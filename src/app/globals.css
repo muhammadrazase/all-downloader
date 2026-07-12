@@ -1,0 +1,85 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    /* Native system-font stack — zero web-font request, best CWV.
+       Swap for a self-hosted Inter (next/font/local) to brand later. */
+    --font-inter: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto,
+      Helvetica, Arial, 'Apple Color Emoji', 'Segoe UI Emoji', sans-serif;
+  }
+
+  * {
+    @apply border-surface-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-surface text-ink font-sans antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-sans font-semibold text-ink;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  /* Visible, consistent focus ring — accessibility, not optional. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-accent ring-offset-2 ring-offset-surface;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-content px-5 sm:px-6 lg:px-8;
+  }
+
+  .btn-accent {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-accent px-5 py-3
+           text-base font-semibold text-accent-fg transition-colors duration-200
+           hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-60;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-surface-border
+           bg-surface px-5 py-3 text-base font-medium text-ink transition-colors duration-200
+           hover:bg-surface-soft;
+  }
+
+  .card {
+    @apply rounded-xl border border-surface-border bg-surface shadow-sm;
+  }
+
+  /* Long-form article typography — readable measure, clear rhythm. */
+  .prose-ssd {
+    @apply max-w-prose text-ink;
+  }
+  .prose-ssd h2 { @apply mt-12 mb-4 text-2xl; }
+  .prose-ssd h3 { @apply mt-8 mb-3 text-xl; }
+  .prose-ssd p { @apply my-4 text-lg leading-relaxed text-ink-muted; }
+  .prose-ssd ul { @apply my-4 ml-5 list-disc space-y-2 text-lg text-ink-muted; }
+  .prose-ssd ol { @apply my-4 ml-5 list-decimal space-y-2 text-lg text-ink-muted; }
+  .prose-ssd a { @apply font-medium text-accent underline underline-offset-2 hover:text-accent-hover; }
+  .prose-ssd strong { @apply font-semibold text-ink; }
+  .prose-ssd blockquote { @apply my-6 border-l-2 border-accent pl-4 italic text-ink-muted; }
+}

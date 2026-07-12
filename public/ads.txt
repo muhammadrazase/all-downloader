@@ -1,0 +1,29 @@
+# ads.txt — authorizes ad networks to sell ads on your site.
+#
+# HOW TO USE:
+# 1. Sign up with an ad network (see ADS-SETUP.md).
+# 2. In that network's dashboard, find its "ads.txt" section — it shows you
+#    the exact line(s) to copy.
+# 3. Paste those line(s) below, REMOVING the leading "#" so the line is active.
+# 4. Delete the examples you are not using. Save + rebuild.
+#
+# Format of each line:  domain, YOUR_PUBLISHER_ID, DIRECT_or_RESELLER, CERT_ID
+# (the network gives you the exact line — just paste it)
+
+# ── Adsterra (replace with the line from your Adsterra dashboard) ──
+# adsterra.com, YOUR_PUBLISHER_ID, RESELLER, 4c5cba9d5c6b0e2f
+
+# ── Monetag ──
+# monetag.com, YOUR_PUBLISHER_ID, DIRECT, 4b6d3f7a2e1c8b9d
+
+# ── Ezoic (Ezoic usually manages ads.txt for you; add its line if asked) ──
+# ezoic.com, YOUR_PUBLISHER_ID, DIRECT
+
+# ── Media.net ──
+# media.net, YOUR_PUBLISHER_ID, DIRECT
+
+# ── HilltopAds ──
+# hilltopads.com, YOUR_PUBLISHER_ID, DIRECT
+
+# ── Galaksion ──
+# galaksion.com, YOUR_PUBLISHER_ID, DIRECT
