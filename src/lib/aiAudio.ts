@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { mkdtempSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { AiError } from './ai';
+import type { PlatformKey } from './platforms';
 
 /**
  * Extract a small, speech-optimized audio file from a video URL for transcription.
@@ -47,12 +48,33 @@ let active = 0;
   }
 })();
 
+/**
+ * Restricts yt-dlp to the extractor family that owns each platform — see the
+ * matching guard in engine.ts. Without it, a whitelisted host whose path
+ * yt-dlp doesn't recognize falls through to the generic extractor, which
+ * fetches (and follows redirects for) whatever is at that URL: a real SSRF
+ * path, sharpened by `t.co` being an attacker-controlled open redirector.
+ */
+const EXTRACTOR_FILTER: Record<PlatformKey, string> = {
+  tiktok: 'tiktok.*',
+  instagram: 'instagram.*',
+  youtube: 'youtube.*',
+  facebook: 'facebook.*',
+  linkedin: 'linkedin.*',
+  twitter: 'twitter.*',
+  pinterest: 'pinterest.*',
+  reddit: 'reddit.*',
+  vimeo: 'vimeo.*',
+  twitch: 'twitch.*',
+  tumblr: 'tumblr.*',
+};
+
 export interface ExtractedAudio {
   filePath: string;
   cleanup: () => void;
 }
 
-export async function extractAudio(url: string): Promise<ExtractedAudio> {
+export async function extractAudio(url: string, platform: PlatformKey): Promise<ExtractedAudio> {
   if (active >= MAX_CONCURRENT) {
     throw new AiError('provider_failed', 'The server is busy processing other videos. Please try again in a moment.', 503);
   }
@@ -95,6 +117,7 @@ export async function extractAudio(url: string): Promise<ExtractedAudio> {
     if (FFMPEG) args.push('--ffmpeg-location', FFMPEG);
     if (COOKIES) args.push('--cookies', COOKIES);
     if (PROXY) args.push('--proxy', PROXY);
+    args.push('--use-extractors', EXTRACTOR_FILTER[platform]);
     // `--` ends option parsing: defense-in-depth so the URL can never be read as a flag.
     args.push('--', url);
 

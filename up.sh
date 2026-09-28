@@ -23,7 +23,7 @@ APP_PORT="${APP_PORT:-3000}"
 # Defaults to your SnapVidly domain — override with DOMAIN=other.com if needed.
 DOMAIN="${DOMAIN:-snapvidly.com}"
 LE_EMAIL="${LE_EMAIL:-admin@snapvidly.com}"
-NODE_MAJOR="${NODE_MAJOR:-20}"
+NODE_MAJOR="${NODE_MAJOR:-22}" # pdfjs-dist + better-sqlite3 both require >=22
 RUN_USER="${RUN_USER:-${SUDO_USER:-$USER}}"
 SERVICE="snapvidly"
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,8 +65,8 @@ fi
 # ── System packages ──────────────────────────────────────────────────
 step "System packages"
 apt-get update -qq
-apt-get install -y -qq curl ca-certificates git ufw nginx ffmpeg python3 >/dev/null
-log "Installed: git, nginx, ffmpeg, ufw, curl."
+apt-get install -y -qq curl ca-certificates git ufw nginx ffmpeg python3 build-essential >/dev/null
+log "Installed: git, nginx, ffmpeg, ufw, curl, build-essential (native module fallback for better-sqlite3)."
 
 # ── Node.js ──────────────────────────────────────────────────────────
 step "Node.js ${NODE_MAJOR}.x"
@@ -117,6 +117,8 @@ set_env_default() {  # only add if absent — never clobbers a value you already
   grep -qE "^${k}=" "$ENV_FILE" || echo "${k}=${v}" >> "$ENV_FILE"
 }
 
+rand_hex32() { openssl rand -hex 32 2>/dev/null || head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'; }
+
 if [ -n "$DOMAIN" ]; then SITE_URL="https://${DOMAIN}"; else
   SERVER_IP="$(curl -fsS4 https://ifconfig.me 2>/dev/null || hostname -I | awk '{print $1}')"
   SITE_URL="http://${SERVER_IP}"
@@ -140,6 +142,25 @@ set_env_default NEXT_PUBLIC_ADS_ENABLED "true"
 set_env_default NEXT_PUBLIC_CONSENT_REQUIRED "false"  # set true to show an EU cookie/consent banner
 set_env_default AI_MAX_CONCURRENT "2"        # simultaneous transcriptions on this box
 set_env_default AI_RATE_LIMIT_PER_MIN "6"    # stricter per-IP limit for the AI endpoints
+# Admin panel (single superadmin, /admin) — auto-generated once, then left alone.
+# Losing SESSION_SECRET signs everyone out; losing CONFIG_ENCRYPTION_KEY makes any
+# keys saved from the admin panel unreadable, so back up .env after first boot.
+set_env_default SESSION_SECRET "$(rand_hex32)"
+set_env_default CONFIG_ENCRYPTION_KEY "$(rand_hex32)"
+# Gates /api/cron/* (the daily AI-quota alert check installed further down).
+set_env_default CRON_SECRET "$(rand_hex32)"
+# nginx sits in front and overwrites X-Real-IP, so per-IP rate limiting can
+# trust it. Set 0 only if the app is ever exposed without a reverse proxy.
+set_env TRUSTED_PROXY "1"
+# Outbound mail (contact form + AI quota alerts). Gmail needs an app password.
+set_env_default SMTP_HOST ""
+set_env_default SMTP_PORT "587"
+set_env_default SMTP_SECURE "false"
+set_env_default SMTP_USER ""
+set_env_default SMTP_PASS ""
+set_env_default SMTP_FROM ""
+set_env_default CONTACT_TO ""
+set_env_default ALERT_EMAIL ""
 chown "$RUN_USER":"$RUN_USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 log "Site URL: $SITE_URL   (edit ad keys anytime in $ENV_FILE, then re-run this script)"
@@ -199,10 +220,76 @@ sleep 2
 systemctl is-active --quiet "${SERVICE}" && log "Service '${SERVICE}' is running on 127.0.0.1:${APP_PORT}." \
   || die "Service failed to start. Check:  journalctl -u ${SERVICE} -n 50"
 
+# ── Daily AI free-quota check (emails the owner when it runs low//out) ─
+step "AI quota alert cron"
+CRON_TOKEN="$(grep -E '^CRON_SECRET=' "$ENV_FILE" | head -1 | cut -d= -f2-)"
+cat >/etc/cron.daily/${SERVICE}-ai-quota <<CRON
+#!/bin/sh
+# Emails ALERT_EMAIL when the free Groq/Gemini quota is low or exhausted, and
+# repeats daily while the condition lasts. Silent when everything is healthy.
+curl -fsS -m 30 -H "x-cron-secret: ${CRON_TOKEN}" \\
+  "http://127.0.0.1:${APP_PORT}/api/cron/ai-quota" >/dev/null 2>&1 || true
+CRON
+chmod 700 /etc/cron.daily/${SERVICE}-ai-quota
+info "Daily AI quota check installed (/etc/cron.daily/${SERVICE}-ai-quota)."
+
+# ── Analytics: self-built country DB (public RIR data, no account/key) + pruning ─
+step "Analytics"
+sudo -u "$RUN_USER" bash -lc "cd '$APP_DIR' && npm run build:geo" \
+  || warn "Country database build failed (no network to the registries?) — country breakdown will show 'ZZ' until 'npm run build:geo' succeeds."
+chown -R "$RUN_USER":"$RUN_USER" "$APP_DIR/data" 2>/dev/null || true
+
+# Refresh the country table monthly — allocations shift slowly, no need for daily.
+cat >/etc/cron.monthly/${SERVICE}-geo-refresh <<CRON
+#!/bin/sh
+cd "${APP_DIR}" && sudo -u "${RUN_USER}" npm run build:geo >/dev/null 2>&1 || true
+CRON
+chmod +x /etc/cron.monthly/${SERVICE}-geo-refresh
+
+cat >/etc/cron.daily/${SERVICE}-analytics-prune <<CRON
+#!/bin/sh
+# Deletes analytics rows older than the retention window. Silent when healthy.
+curl -fsS -m 30 -H "x-cron-secret: ${CRON_TOKEN}" \\
+  "http://127.0.0.1:${APP_PORT}/api/cron/analytics-prune" >/dev/null 2>&1 || true
+CRON
+chmod 700 /etc/cron.daily/${SERVICE}-analytics-prune
+info "Daily analytics pruning installed (/etc/cron.daily/${SERVICE}-analytics-prune)."
+
+step "Admin panel"
+if [ -f "$APP_DIR/data/admin.db" ]; then
+  info "Admin database already present — leaving it alone. Reset the password anytime with:  npm run admin:reset"
+else
+  warn "No admin account yet. Create one now (run as $RUN_USER):"
+  warn "    sudo -u $RUN_USER bash -lc 'cd $APP_DIR && npm run admin:create'"
+fi
+
 # ── Nginx reverse proxy (tuned for streaming downloads) ──────────────
 step "Nginx reverse proxy"
 SERVER_NAME="${DOMAIN:-_}"
 [ -n "$DOMAIN" ] && SERVER_NAME="${DOMAIN} www.${DOMAIN}"
+
+# Let nginx traverse into the build output so big assets (ffmpeg.wasm, OCR
+# cores, JS chunks) are served from disk instead of through Node. Traverse-only
+# (+X), never +r on the directory itself.
+chmod a+X "$(dirname "$APP_DIR")" "$APP_DIR" 2>/dev/null || true
+chmod -R a+rX "$APP_DIR/public" 2>/dev/null || true
+[ -d "$APP_DIR/.next/static" ] && chmod -R a+rX "$APP_DIR/.next" 2>/dev/null || true
+
+# http-level directives (cache zone, rate-limit zone, keepalive upstream) can't
+# live in a server block, so they go in conf.d.
+cat >/etc/nginx/conf.d/${SERVICE}-http.conf <<HTTPCONF
+proxy_cache_path /var/cache/nginx/${SERVICE} levels=1:2 keys_zone=${SERVICE}_api:10m max_size=256m inactive=60m use_temp_path=off;
+limit_req_zone \$binary_remote_addr zone=${SERVICE}_extract:10m rate=30r/m;
+limit_req_zone \$binary_remote_addr zone=${SERVICE}_track:10m rate=60r/m;
+
+upstream ${SERVICE}_app {
+    server 127.0.0.1:${APP_PORT};
+    keepalive 64;
+}
+HTTPCONF
+mkdir -p /var/cache/nginx/${SERVICE}
+chown -R www-data:www-data /var/cache/nginx/${SERVICE} 2>/dev/null || true
+
 cat >/etc/nginx/sites-available/${SERVICE} <<NGINX
 server {
     listen 80;
@@ -216,29 +303,70 @@ server {
     gzip_min_length 256;
     gzip_types text/plain text/css application/json application/javascript application/xml application/rss+xml application/manifest+json image/svg+xml font/woff2;
 
-    # Immutable build assets — cache for a year (hashed filenames make this safe).
-    # Huge repeat-visit speedup; served straight from Nginx's proxy cache path.
+    # Immutable, content-hashed build assets — served from disk, never via Node.
+    # try_files falls back to the app if nginx can't read them (permissions).
     location /_next/static/ {
-        proxy_pass http://127.0.0.1:${APP_PORT};
-        proxy_set_header Host \$host;
+        alias ${APP_DIR}/.next/static/;
         add_header Cache-Control "public, max-age=31536000, immutable";
         access_log off;
+        try_files \$uri @app;
     }
 
-    # App (static pages + light API)
-    location / {
-        proxy_pass http://127.0.0.1:${APP_PORT};
+    # Self-hosted heavy engines (ffmpeg.wasm ~32MB, Tesseract cores, pdf worker).
+    location ~ ^/(ffmpeg|ocr|pdf)/ {
+        root ${APP_DIR}/public;
+        add_header Cache-Control "public, max-age=2592000";
+        access_log off;
+        try_files \$uri @app;
+    }
+
+    # Cacheable public read API — a few seconds of shared cache absorbs bursts.
+    location ~ ^/api/(tools|blog/posts) {
+        proxy_pass http://${SERVICE}_app;
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_cache ${SERVICE}_api;
+        proxy_cache_valid 200 60s;
+        proxy_cache_use_stale updating error timeout;
+        proxy_cache_lock on;
+        add_header X-Cache-Status \$upstream_cache_status;
+    }
+
+    # Metadata extraction: the expensive upstream call. Throttle abuse here so it
+    # never reaches Node; bursts of 10 still pass for real users on flaky links.
+    location /api/extract {
+        limit_req zone=${SERVICE}_extract burst=10 nodelay;
+        proxy_pass http://${SERVICE}_app;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Streaming downloads: no buffering, long timeouts for big HD files.
-    location /api/download {
-        proxy_pass http://127.0.0.1:${APP_PORT};
+    # Analytics beacon: cheap but fires on every tool-page visit — its own zone so
+    # it never eats into the extract/download budget for a shared-IP visitor.
+    location /api/track {
+        limit_req zone=${SERVICE}_track burst=20 nodelay;
+        proxy_pass http://${SERVICE}_app;
         proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    # Streaming downloads: no buffering, long timeouts, never cached.
+    location /api/download {
+        proxy_pass http://${SERVICE}_app;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -247,6 +375,24 @@ server {
         proxy_request_buffering off;
         proxy_read_timeout 600s;
         proxy_send_timeout 600s;
+    }
+
+    # App (static pages + everything else)
+    location / {
+        proxy_pass http://${SERVICE}_app;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+
+    location @app {
+        proxy_pass http://${SERVICE}_app;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host \$host;
     }
 }
 NGINX

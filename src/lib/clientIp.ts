@@ -8,12 +8,25 @@
  *
  * Never trust the LEFTMOST XFF value: a client can spoof it to rotate IPs and
  * bypass the limiter entirely.
+ *
+ * These headers are only meaningful when SOMETHING in front overwrites them.
+ * Set TRUSTED_PROXY=0 when the app is exposed directly (no nginx / no platform
+ * edge): the headers then become fully attacker-controlled, which would let one
+ * client mint a fresh rate-limit bucket per request.
  */
-export function clientIp(req: Request): string {
-  const real = req.headers.get('x-real-ip');
+interface HeadersLike {
+  get(name: string): string | null;
+}
+
+const trustProxyHeaders = (): boolean => process.env.TRUSTED_PROXY !== '0';
+
+export function clientIp(headers: HeadersLike): string {
+  if (!trustProxyHeaders()) return 'anon';
+
+  const real = headers.get('x-real-ip');
   if (real) return real.trim();
 
-  const fwd = req.headers.get('x-forwarded-for');
+  const fwd = headers.get('x-forwarded-for');
   if (fwd) {
     const parts = fwd.split(',').map((s) => s.trim()).filter(Boolean);
     if (parts.length) return parts[parts.length - 1]!;

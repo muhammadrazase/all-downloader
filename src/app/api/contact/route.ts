@@ -1,8 +1,9 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import nodemailer from 'nodemailer';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { clientIp } from '@/lib/clientIp';
+import { getSetting } from '@/lib/config/settings.server';
+import { mailerConfigured, sendMail } from '@/lib/mailer';
 import { site } from '@/lib/site';
 
 export const runtime = 'nodejs';
@@ -12,14 +13,12 @@ const schema = z.object({
   name: z.string().trim().min(1).max(100),
   email: z.string().trim().email().max(200),
   message: z.string().trim().min(5).max(5000),
+  type: z.enum(['contact', 'suggestion']).default('contact'),
 });
-
-const smtpConfigured = () =>
-  Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
 
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { success } = await checkRateLimit(clientIp(req));
+  const { success } = await checkRateLimit(clientIp(req.headers));
   if (!success) return NextResponse.json({ error: 'Too many messages. Please wait a moment.' }, { status: 429 });
 
   let body: Record<string, unknown>;
@@ -40,23 +39,16 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   // If SMTP isn't set up, tell the client to fall back to the mailto link.
-  if (!smtpConfigured()) {
+  if (!mailerConfigured()) {
     return NextResponse.json({ error: 'not_configured' }, { status: 503 });
   }
 
-  const { name, email, message } = parsed.data;
+  const { name, email, message, type } = parsed.data;
   try {
-    const transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT ?? 587),
-      secure: process.env.SMTP_SECURE === 'true', // true for 465, false for 587/STARTTLS
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
-    await transporter.sendMail({
-      from: process.env.SMTP_FROM || `SnapVidly <${process.env.SMTP_USER}>`,
-      to: process.env.CONTACT_TO || site.email,
-      replyTo: `${name} <${email}>`,
-      subject: `SnapVidly contact — ${name}`,
+    await sendMail({
+      to: getSetting('CONTACT_TO') || site.email,
+      replyTo: { name, address: email },
+      subject: `SnapVidly ${type === 'suggestion' ? 'suggestion' : 'contact'} from ${name}`,
       text: `${message}\n\n— ${name} <${email}>`,
     });
     return NextResponse.json({ ok: true });

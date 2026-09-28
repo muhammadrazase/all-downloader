@@ -1,9 +1,8 @@
 'use client';
 
 import { useCallback, useRef, useState } from 'react';
-import { convert, type ConvertKind } from '@/lib/convert';
+import { convert, ConvertError, MAX_INPUT_MB, assertConvertible, type ConvertKind } from '@/lib/convert';
 
-const MAX_MB = 200;
 const LABELS: Record<ConvertKind, string> = {
   mp3: 'MP3 audio',
   gif: 'Animated GIF',
@@ -25,14 +24,15 @@ export function ConverterBox({ kinds }: { kinds: ConvertKind[] }) {
 
   const pick = useCallback((f: File | undefined) => {
     if (!f) return;
-    if (!f.type.startsWith('video/') && !/\.(mp4|mov|webm|mkv|avi|m4v)$/i.test(f.name)) {
+    try {
+      assertConvertible(f);
+    } catch (err) {
       setStatus('error');
-      setMessage('Please choose a video file.');
-      return;
-    }
-    if (f.size > MAX_MB * 1024 * 1024) {
-      setStatus('error');
-      setMessage(`That file is over ${MAX_MB} MB. Try a shorter clip.`);
+      setMessage(
+        err instanceof ConvertError && err.code === 'too_large'
+          ? `That file is over ${MAX_INPUT_MB} MB. Try a shorter clip.`
+          : 'Please choose a video file.',
+      );
       return;
     }
     setFile(f);
@@ -51,9 +51,13 @@ export function ConverterBox({ kinds }: { kinds: ConvertKind[] }) {
       const { blob, filename } = await convert(file, kind, setProgress);
       setOut({ url: URL.createObjectURL(blob), name: filename, type: blob.type });
       setStatus('done');
-    } catch {
+    } catch (err) {
       setStatus('error');
-      setMessage('Conversion failed. The file may be too large or in an unsupported format.');
+      setMessage(
+        err instanceof ConvertError && err.code === 'too_large'
+          ? `That file is over ${MAX_INPUT_MB} MB. Try a shorter clip.`
+          : 'Conversion failed. The file may be in an unsupported format, or have no audio/video track.',
+      );
     }
   }, [file, kind]);
 
@@ -82,7 +86,7 @@ export function ConverterBox({ kinds }: { kinds: ConvertKind[] }) {
           <path d="M12 16V4m0 0L8 8m4-4 4 4M4 20h16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
         <p className="font-medium text-ink">{file ? file.name : 'Drag a video here, or click to choose'}</p>
-        <p className="text-xs text-ink-muted">{file ? `${(file.size / 1048576).toFixed(1)} MB` : `MP4, MOV, WebM… up to ${MAX_MB} MB`}</p>
+        <p className="text-xs text-ink-muted">{file ? `${(file.size / 1048576).toFixed(1)} MB` : `MP4, MOV, WebM… up to ${MAX_INPUT_MB} MB`}</p>
         <input
           ref={inputRef}
           type="file"
@@ -137,7 +141,11 @@ export function ConverterBox({ kinds }: { kinds: ConvertKind[] }) {
               // eslint-disable-next-line @next/next/no-img-element
               <img src={out.url} alt="Converted GIF" className="mx-auto max-h-64 rounded-lg" />
             )}
-            {out.type.startsWith('video') && <video controls src={out.url} className="mx-auto max-h-64 rounded-lg" />}
+            {out.type.startsWith('video') && (
+              <div className="flex h-64 items-center justify-center overflow-hidden rounded-xl bg-ink sm:h-80">
+                <video controls src={out.url} className="max-h-full max-w-full rounded-lg" />
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap gap-2">
               <a href={out.url} download={out.name} className="btn-accent">
                 Download {out.name}

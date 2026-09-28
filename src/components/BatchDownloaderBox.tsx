@@ -3,7 +3,7 @@
 import { useCallback, useState } from 'react';
 import { detectPlatform, getPlatformByKey } from '@/lib/platforms';
 import { runPool } from '@/lib/pool';
-import { buildDownloadHref } from '@/lib/download';
+import { buildDownloadHref, triggerLocalDownload } from '@/lib/download';
 import { PlatformIcon } from './PlatformIcon';
 import type { ExtractResult, QualityOption } from '@/lib/types';
 
@@ -16,6 +16,7 @@ interface BatchItem {
   status: ItemStatus;
   result?: ExtractResult;
   error?: string;
+  downloadError?: string;
 }
 
 export function BatchDownloaderBox() {
@@ -66,17 +67,28 @@ export function BatchDownloaderBox() {
   const doneCount = items?.filter((i) => i.status !== 'queued' && i.status !== 'fetching').length ?? 0;
 
   // Trigger sequential downloads of each ready item's top quality (staggered).
+  // Direct CDN URLs (option.url set) are a plain click; local-mode hrefs go through
+  // triggerLocalDownload so a failed one reports an error instead of silently
+  // saving the JSON error body as a mystery file.
   const downloadAll = () => {
-    const ready = items?.filter((i) => i.status === 'ready' && i.result?.options.length) ?? [];
-    ready.forEach((it, idx) => {
+    const ready = (items ?? [])
+      .map((it, i) => ({ it, i }))
+      .filter(({ it }) => it.status === 'ready' && it.result?.options.length);
+    ready.forEach(({ it, i }, idx) => {
       const opt = it.result!.options[0]!;
       const href = buildDownloadHref(it.result!.sourceUrl, it.result!.platform, opt);
       setTimeout(() => {
-        const a = document.createElement('a');
-        a.href = href;
-        a.rel = 'nofollow noopener';
-        a.target = '_blank';
-        a.click();
+        if (opt.url) {
+          const a = document.createElement('a');
+          a.href = href;
+          a.rel = 'nofollow noopener';
+          a.target = '_blank';
+          a.click();
+          return;
+        }
+        void triggerLocalDownload(href).then((outcome) => {
+          if (!outcome.ok) setItem(i, { downloadError: outcome.error });
+        });
       }, idx * 1200);
     });
   };
@@ -147,6 +159,7 @@ function BatchRow({ item }: { item: BatchItem }) {
           <p className="mt-1 line-clamp-1 text-sm font-medium text-ink">{item.result.title}</p>
         )}
         {item.status === 'error' && <p className="mt-1 text-sm text-danger">{item.error}</p>}
+        {item.downloadError && <p className="mt-1 text-sm text-danger">{item.downloadError}</p>}
         {item.status === 'unsupported' && <p className="mt-1 text-sm text-ink-muted">Unsupported or invalid link</p>}
       </div>
       <div className="mt-3 sm:mt-0">
@@ -162,17 +175,48 @@ function RowOptions({ result }: { result: ExtractResult }) {
   return (
     <div className="flex flex-wrap gap-1.5">
       {result.options.slice(0, 4).map((o: QualityOption) => (
-        <a
-          key={o.quality}
-          href={buildDownloadHref(result.sourceUrl, result.platform, o)}
-          download
-          target="_blank"
-          rel="nofollow noopener"
-          className="inline-flex items-center rounded-lg border border-surface-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-accent hover:text-accent"
-        >
-          {o.label}
-        </a>
+        <BatchOptionButton key={o.quality} result={result} option={o} />
       ))}
     </div>
+  );
+}
+
+function BatchOptionButton({ result, option }: { result: ExtractResult; option: QualityOption }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState('');
+  const cls = 'inline-flex items-center rounded-lg border border-surface-border bg-surface px-2.5 py-1.5 text-xs font-medium text-ink transition-colors hover:border-accent hover:text-accent';
+
+  // Direct CDN URL (API mode) → cross-origin, can't be fetched here — plain navigation.
+  if (option.url) {
+    return (
+      <a href={option.url} download target="_blank" rel="nofollow noopener" className={cls}>
+        {option.label}
+      </a>
+    );
+  }
+
+  const href = buildDownloadHref(result.sourceUrl, result.platform, option);
+  return (
+    <span className="inline-flex flex-col items-start gap-1">
+      <a
+        href={href}
+        download
+        rel="nofollow noopener"
+        aria-busy={state === 'loading'}
+        className={`${cls} ${state === 'loading' ? 'cursor-wait opacity-70' : ''}`}
+        onClick={async (e) => {
+          e.preventDefault();
+          if (state === 'loading') return;
+          setState('loading');
+          setError('');
+          const outcome = await triggerLocalDownload(href);
+          setState(outcome.ok ? 'idle' : 'error');
+          if (!outcome.ok) setError(outcome.error);
+        }}
+      >
+        {state === 'loading' ? 'Preparing…' : option.label}
+      </a>
+      {state === 'error' && <span className="text-xs text-danger">{error}</span>}
+    </span>
   );
 }

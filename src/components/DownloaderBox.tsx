@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { detectPlatform, getPlatformByKey, type Platform, type PlatformKey } from '@/lib/platforms';
 import type { ExtractResult, QualityOption } from '@/lib/types';
+import { buildDownloadHref, triggerLocalDownload } from '@/lib/download';
 import { PlatformIcon } from './PlatformIcon';
 
 type Status = 'idle' | 'invalid' | 'fetching' | 'ready' | 'error';
@@ -154,7 +155,15 @@ export function DownloaderBox({ platformKey, autoFocus }: Props) {
           <button type="button" onClick={pasteFromClipboard} className="btn-ghost h-12 flex-1 sm:flex-none">
             Paste
           </button>
-          <button type="submit" disabled={status === 'fetching'} className="btn-accent h-12 flex-1 sm:flex-none">
+          {/* The label goes icon-only while fetching, so it keeps an explicit
+              accessible name; aria-busy announces the state instead of silence. */}
+          <button
+            type="submit"
+            disabled={status === 'fetching'}
+            aria-label={status === 'fetching' ? 'Fetching your video' : 'Download'}
+            aria-busy={status === 'fetching'}
+            className="btn-accent h-12 flex-1 sm:flex-none"
+          >
             {status === 'fetching' ? <Spinner /> : 'Download'}
           </button>
         </div>
@@ -243,19 +252,65 @@ function OptionButton({
   platform: string;
   primary?: boolean;
 }) {
+  const [state, setState] = useState<'idle' | 'loading' | 'error'>('idle');
+  const [error, setError] = useState('');
+
   // Direct CDN URL (API mode) → download straight from source, zero server
-  // bandwidth. Otherwise route through /api/download (local merge mode).
-  const href = option.url ?? `/api/download?u=${encodeURIComponent(sourceUrl)}&p=${platform}&q=${option.quality}`;
-  const cls = primary
-    ? 'btn-accent'
-    : 'inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm font-medium text-ink transition-colors hover:border-accent hover:text-accent';
+  // bandwidth, cross-origin so it can't be fetched here — plain navigation.
+  if (option.url) {
+    return (
+      <a href={option.url} download rel="nofollow noopener" target="_blank" className={primary ? 'btn-accent' : SECONDARY_CLASS}>
+        <DownloadIcon primary={primary} />
+        {primary ? `Download ${option.label}` : option.label}
+      </a>
+    );
+  }
+
+  // Local merge mode: same-origin, so a failed extraction (age-restricted,
+  // region-locked, YouTube blocking that title right now, etc.) can be caught
+  // here instead of the browser silently saving the JSON error as "download.json".
+  const href = buildDownloadHref(sourceUrl, platform, option);
+  const onClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (state === 'loading') return;
+    setState('loading');
+    setError('');
+    const outcome = await triggerLocalDownload(href);
+    if (outcome.ok) {
+      setState('idle');
+    } else {
+      setState('error');
+      setError(outcome.error);
+    }
+  };
+
+  const cls = primary ? 'btn-accent' : SECONDARY_CLASS;
   return (
-    <a href={href} download rel="nofollow noopener" target={option.url ? '_blank' : undefined} className={cls}>
-      <svg width={primary ? 18 : 16} height={primary ? 18 : 16} viewBox="0 0 24 24" fill="none" aria-hidden="true">
-        <path d="M12 4v10m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      </svg>
-      {primary ? `Download ${option.label}` : option.label}
-    </a>
+    <span className="inline-flex flex-col items-start gap-1.5">
+      <a
+        href={href}
+        download
+        rel="nofollow noopener"
+        onClick={onClick}
+        aria-busy={state === 'loading'}
+        className={`${cls} ${state === 'loading' ? 'cursor-wait opacity-80' : ''}`}
+      >
+        {state === 'loading' ? <Spinner /> : <DownloadIcon primary={primary} />}
+        {state === 'loading' ? 'Preparing…' : primary ? `Download ${option.label}` : option.label}
+      </a>
+      {state === 'error' && <span className="text-xs text-danger">{error}</span>}
+    </span>
+  );
+}
+
+const SECONDARY_CLASS =
+  'inline-flex items-center gap-1.5 rounded-lg border border-surface-border bg-surface px-3 py-2 text-sm font-medium text-ink transition-colors hover:border-accent hover:text-accent';
+
+function DownloadIcon({ primary }: { primary: boolean }) {
+  return (
+    <svg width={primary ? 18 : 16} height={primary ? 18 : 16} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M12 4v10m0 0-4-4m4 4 4-4M5 19h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

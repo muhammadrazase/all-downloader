@@ -17,7 +17,7 @@ export default function PrivacyPage() {
     <>
       <PageHeader title="Privacy Policy" subtitle="Short version: we collect almost nothing." />
       <article className="prose-ssd mx-auto px-5 pb-16">
-        <p><strong>Last updated: January 2026.</strong></p>
+        <p><strong>Last updated: September 2026.</strong></p>
         <h2>What we collect</h2>
         <p>
           We do not require an account and we do not ask for your social media logins. We do not store the videos you
@@ -26,7 +26,11 @@ export default function PrivacyPage() {
         <h2>Analytics</h2>
         <p>
           We use privacy-friendly, cookieless analytics to understand aggregate traffic (for example, which pages are
-          popular). This does not track you across websites and does not identify you personally.
+          popular). This does not track you across websites and does not identify you personally. We also keep a
+          first-party count of which tools are used and, at a country level only (never city or precise location),
+          roughly where visitors come from. Your IP address is used for a moment to look up your country and to keep a
+          same-day, non-reversible count of unique visitors — it is never written to disk, never linked to your
+          activity, and the daily count becomes unlinkable to any individual again the next day.
         </p>
         <h2>Rate limiting</h2>
         <p>

@@ -4,18 +4,23 @@ import { FAQ } from './FAQ';
 import { Steps } from './Steps';
 import { Breadcrumbs } from './Breadcrumbs';
 import { JsonLd } from './JsonLd';
+import { TrackView } from './TrackView';
 import { AdSlot } from './ads/AdSlot';
 import { RelatedOffers } from './RelatedOffers';
 import type { ConverterTool } from '@/lib/converterTools';
+import { CONVERTER_LIST } from '@/lib/converterTools';
 import { webApplicationSchema, faqSchema, howToSchema, breadcrumbSchema } from '@/lib/schema';
 
-export function ConverterToolPage({ tool }: { tool: ConverterTool }) {
+/** `children` is for a tool (like the Trimmer) with no `kinds` — its UI isn't a kind-picker, so it supplies its own box instead of ConverterBox. */
+export function ConverterToolPage({ tool, children }: { tool: ConverterTool; children?: React.ReactNode }) {
   const crumbs = [
     { name: 'Home', path: '/' },
     { name: tool.name, path: `/${tool.slug}` },
   ];
+  const otherTools = CONVERTER_LIST.filter((t) => t.slug !== tool.slug);
   return (
     <>
+      <TrackView tool={tool.slug} />
       <JsonLd data={webApplicationSchema(tool.metaTitle, `/${tool.slug}`, tool.metaDescription)} />
       <JsonLd data={faqSchema(tool.faqs)} />
       <JsonLd data={howToSchema(`How to convert ${tool.name.toLowerCase()}`, tool.steps)} />
@@ -26,10 +31,10 @@ export function ConverterToolPage({ tool }: { tool: ConverterTool }) {
       </section>
 
       <section className="container-page py-10 text-center sm:py-14">
-        <h1 className="mx-auto max-w-3xl text-3xl font-bold text-ink sm:text-4xl">{tool.h1}</h1>
+        <h1 className="mx-auto max-w-3xl text-4xl font-bold text-ink sm:text-5xl">{tool.h1}</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-ink-muted">{tool.intro}</p>
         <div className="mx-auto mt-8 max-w-2xl text-left">
-          <ConverterBox kinds={tool.kinds} />
+          {tool.kinds?.length ? <ConverterBox kinds={tool.kinds} /> : children}
         </div>
       </section>
 
@@ -63,16 +68,21 @@ export function ConverterToolPage({ tool }: { tool: ConverterTool }) {
 
       <RelatedOffers context="converter" heading="Recommended tools" />
 
-      <section className="border-t border-surface-border bg-surface-soft">
-        <div className="container-page py-12 text-center">
-          <p className="text-ink-muted">
-            More converters:{' '}
-            <Link href="/video-to-mp3" className="font-medium text-accent hover:text-accent-hover">Video to MP3</Link>{' · '}
-            <Link href="/video-to-gif" className="font-medium text-accent hover:text-accent-hover">Video to GIF</Link>{' · '}
-            <Link href="/video-converter" className="font-medium text-accent hover:text-accent-hover">All-in-one converter</Link>
-          </p>
-        </div>
-      </section>
+      {otherTools.length > 0 && (
+        <section className="border-t border-surface-border bg-surface-soft">
+          <div className="container-page py-12 text-center">
+            <p className="text-ink-muted">
+              More converters:{' '}
+              {otherTools.map((t, i) => (
+                <span key={t.slug}>
+                  {i > 0 && ' · '}
+                  <Link href={`/${t.slug}`} className="font-medium text-accent hover:text-accent-hover">{t.name}</Link>
+                </span>
+              ))}
+            </p>
+          </div>
+        </section>
+      )}
     </>
   );
 }

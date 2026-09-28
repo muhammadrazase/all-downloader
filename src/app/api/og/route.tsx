@@ -3,10 +3,15 @@ import { site } from '@/lib/site';
 
 export const runtime = 'edge';
 
+const HEX_COLOR = /^[0-9a-fA-F]{6}$/;
+
 /** Dynamic 1200×630 social share image — no static asset to maintain. */
 export function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const title = (searchParams.get('title') ?? site.name).slice(0, 110);
+  // Strictly validated — this is interpolated into inline styles on the edge runtime, which has no CSP backstop.
+  const rawColor = searchParams.get('color');
+  const accent = rawColor && HEX_COLOR.test(rawColor) ? `#${rawColor}` : '#2563EB';
 
   return new ImageResponse(
     (
@@ -27,7 +32,7 @@ export function GET(req: Request) {
               width: 44,
               height: 44,
               borderRadius: 12,
-              background: '#2563EB',
+              background: accent,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',

@@ -8,6 +8,8 @@ import { JsonLd } from '@/components/JsonLd';
 import { AdSlot } from '@/components/ads/AdSlot';
 import { PLATFORM_LIST, getPlatformByKey, type PlatformKey } from '@/lib/platforms';
 import { buildMetadata } from '@/lib/seo';
+import { platformKeywords } from '@/lib/seoDefaults';
+import { getSeoOverride } from '@/lib/config/contentConfig';
 import { howToSchema, faqSchema, breadcrumbSchema } from '@/lib/schema';
 
 export const dynamic = 'force-static';
@@ -25,10 +27,19 @@ export async function generateMetadata({
   const { platform } = await params;
   const p = getPlatformByKey(platform);
   if (!p) return {};
+  // Only the keyword override is honored here — title/description stay this
+  // page's own distinct copy, not the admin's single per-platform form.
+  const override = getSeoOverride('platform', p.key);
   return buildMetadata({
     title: `How to Download ${p.name} Videos (Mobile & PC) — Step by Step`,
     description: `A simple step-by-step guide to downloading ${p.name} videos on your phone and computer, free and without a watermark.`,
     path: `/how-to/${p.key}`,
+    keywords: override?.keywords || [
+      ...platformKeywords(p),
+      'how to download',
+      `how to download ${p.name} videos`,
+      `${p.name} download guide`,
+    ],
   });
 }
 
@@ -37,9 +48,10 @@ export default async function HowToPage({ params }: { params: Promise<{ platform
   const p = getPlatformByKey(platform);
   if (!p) notFound();
 
+  // No generic /how-to index page exists, so a distinct "How-to" crumb would
+  // link to the exact same URL as the page it's on — just two levels instead.
   const crumbs = [
     { name: 'Home', path: '/' },
-    { name: 'How-to', path: `/how-to/${p.key}` },
     { name: `Download ${p.name} videos`, path: `/how-to/${p.key}` },
   ];
 

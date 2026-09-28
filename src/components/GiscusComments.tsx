@@ -3,14 +3,21 @@
 import { useEffect, useRef } from 'react';
 import { site } from '@/lib/site';
 
+export interface GiscusConfig {
+  repo: string;
+  repoId: string;
+  category: string;
+  categoryId: string;
+}
+
 /**
  * Giscus (GitHub Discussions) — our zero-database community layer.
  * Renders only when configured; otherwise shows a friendly placeholder so the
  * page never looks broken during setup.
  */
-export function GiscusComments() {
+export function GiscusComments({ giscus = site.giscus }: { giscus?: GiscusConfig }) {
   const ref = useRef<HTMLDivElement>(null);
-  const configured = Boolean(site.giscus.repo && site.giscus.repoId && site.giscus.categoryId);
+  const configured = Boolean(giscus.repo && giscus.repoId && giscus.categoryId);
 
   useEffect(() => {
     if (!configured || !ref.current || ref.current.querySelector('script')) return;
@@ -18,16 +25,16 @@ export function GiscusComments() {
     script.src = 'https://giscus.app/client.js';
     script.async = true;
     script.crossOrigin = 'anonymous';
-    script.setAttribute('data-repo', site.giscus.repo);
-    script.setAttribute('data-repo-id', site.giscus.repoId);
-    script.setAttribute('data-category', site.giscus.category);
-    script.setAttribute('data-category-id', site.giscus.categoryId);
+    script.setAttribute('data-repo', giscus.repo);
+    script.setAttribute('data-repo-id', giscus.repoId);
+    script.setAttribute('data-category', giscus.category);
+    script.setAttribute('data-category-id', giscus.categoryId);
     script.setAttribute('data-mapping', 'pathname');
     script.setAttribute('data-reactions-enabled', '1');
     script.setAttribute('data-theme', 'light');
     script.setAttribute('data-loading', 'lazy');
     ref.current.appendChild(script);
-  }, [configured]);
+  }, [configured, giscus.repo, giscus.repoId, giscus.category, giscus.categoryId]);
 
   if (!configured) {
     return (

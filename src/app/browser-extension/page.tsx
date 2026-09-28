@@ -7,6 +7,7 @@ import { JsonLd } from '@/components/JsonLd';
 import { buildMetadata } from '@/lib/seo';
 import { faqSchema } from '@/lib/schema';
 import { site } from '@/lib/site';
+import { getSetting } from '@/lib/config/settings.server';
 import type { Faq } from '@/lib/platforms';
 
 export const dynamic = 'force-static';
@@ -49,6 +50,7 @@ const faqs: Faq[] = [
 ];
 
 export default function ExtensionPage() {
+  const extensionUrl = getSetting('CHROME_EXTENSION_URL') || site.chromeExtensionUrl;
   return (
     <>
       <JsonLd
@@ -59,7 +61,7 @@ export default function ExtensionPage() {
           applicationCategory: 'BrowserApplication',
           operatingSystem: 'Chrome',
           url: `${site.url}/browser-extension`,
-          ...(site.chromeExtensionUrl ? { downloadUrl: site.chromeExtensionUrl, installUrl: site.chromeExtensionUrl } : {}),
+          ...(extensionUrl ? { downloadUrl: extensionUrl, installUrl: extensionUrl } : {}),
           offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
           aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.8', ratingCount: '640' },
         }}
@@ -79,7 +81,7 @@ export default function ExtensionPage() {
           copy-pasting links — just click and save.
         </p>
         <div className="mt-8">
-          <InstallExtensionCTA />
+          <InstallExtensionCTA url={extensionUrl} />
         </div>
       </section>
 

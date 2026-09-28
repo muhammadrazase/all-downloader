@@ -2,6 +2,7 @@ import type { ExtractResult, QualityOption } from './types';
 import type { PlatformKey } from './platforms';
 import { humanFormatLabel } from './format';
 import { EngineError } from './engine-error';
+import { getSetting } from './config/settings.server';
 
 /**
  * Third-party API engine (the free/Vercel path).
@@ -36,10 +37,20 @@ interface ApiMedia {
   formattedSize?: string;
 }
 
-export async function extractViaApi(url: string, platform: PlatformKey): Promise<ExtractResult> {
-  const key = process.env.RAPIDAPI_KEY!;
-  const host = process.env.RAPIDAPI_HOST!;
-  const endpoint = process.env.RAPIDAPI_ENDPOINT || `https://${host}/v1/social/autolink`;
+export interface RapidApiCreds {
+  key: string;
+  host: string;
+}
+
+export async function extractViaApi(
+  url: string,
+  platform: PlatformKey,
+  creds?: RapidApiCreds,
+): Promise<ExtractResult> {
+  // Creds are passed down from extract() so the hot path reads each setting once.
+  const key = creds?.key ?? getSetting('RAPIDAPI_KEY') ?? '';
+  const host = creds?.host ?? getSetting('RAPIDAPI_HOST') ?? '';
+  const endpoint = getSetting('RAPIDAPI_ENDPOINT') || `https://${host}/v1/social/autolink`;
 
   let res: Response;
   try {

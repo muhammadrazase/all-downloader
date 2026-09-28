@@ -27,17 +27,25 @@ export const websiteSchema = () => ({
   },
 });
 
-export const webApplicationSchema = (name: string, path: string, description: string) => ({
+export const webApplicationSchema = (
+  name: string,
+  path: string,
+  description: string,
+  applicationCategory: string = 'MultimediaApplication',
+) => ({
   '@context': 'https://schema.org',
   '@type': 'WebApplication',
   name,
   url: `${site.url}${path}`,
   description,
-  applicationCategory: 'MultimediaApplication',
+  applicationCategory,
   operatingSystem: 'Any',
   browserRequirements: 'Requires a modern web browser',
   offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
-  aggregateRating: { '@type': 'AggregateRating', ratingValue: '4.8', ratingCount: '1240' },
+  isAccessibleForFree: true,
+  // No aggregateRating: fabricated review counts violate Google's structured
+  // data policy and risk a sitewide manual action. Add this back only once
+  // real collected ratings exist.
 });
 
 /** ItemList of the site's tools — helps Google understand the toolkit (sitelinks). */

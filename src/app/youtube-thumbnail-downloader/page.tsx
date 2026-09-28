@@ -1,19 +1,28 @@
 import type { Metadata } from 'next';
+import { redirect } from 'next/navigation';
 import { ImageToolPage } from '@/components/ImageToolPage';
 import { IMAGE_TOOLS } from '@/lib/imageTools';
 import { buildMetadata } from '@/lib/seo';
+import { getSeoOverride, isContentEnabled } from '@/lib/config/contentConfig';
+import { toolKeywords } from '@/lib/seoDefaults';
 
 export const dynamic = 'force-static';
 
 const tool = IMAGE_TOOLS['youtube-thumbnail'];
 
-export const metadata: Metadata = buildMetadata({
-  title: tool.metaTitle,
-  description: tool.metaDescription,
-  path: `/${tool.slug}`,
-  keywords: [tool.keyword, 'youtube thumbnail grabber', 'download youtube thumbnail', 'youtube thumbnail hd', 'get youtube thumbnail image', 'youtube maxresdefault', 'youtube cover image'],
-});
+export async function generateMetadata(): Promise<Metadata> {
+  const override = getSeoOverride('image-tool', tool.key);
+  return buildMetadata({
+    title: override?.title || tool.metaTitle,
+    description: override?.description || tool.metaDescription,
+    path: override?.canonical || `/${tool.slug}`,
+    noindex: override?.noindex,
+    image: override?.ogImage,
+    keywords: override?.keywords || toolKeywords(tool.key, tool.keyword),
+  });
+}
 
 export default function Page() {
+  if (!isContentEnabled('image-tool', tool.key)) redirect('/');
   return <ImageToolPage tool={tool} />;
 }

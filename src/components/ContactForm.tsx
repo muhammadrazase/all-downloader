@@ -1,16 +1,16 @@
 'use client';
 
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { site } from '@/lib/site';
 
-/**
- * Contact form → posts to /api/contact (SMTP email, server-side).
- * Falls back to a mailto link if SMTP isn't configured or the send fails.
- * Includes a honeypot field for spam protection.
- */
 type Status = 'idle' | 'sending' | 'sent' | 'error';
+type MessageType = 'contact' | 'suggestion';
 
+/** Posts to /api/contact; falls back to mailto if SMTP isn't configured. Honeypot for spam. */
 export function ContactForm() {
+  const searchParams = useSearchParams();
+  const [type, setType] = useState<MessageType>(searchParams.get('type') === 'suggestion' ? 'suggestion' : 'contact');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
@@ -19,7 +19,9 @@ export function ContactForm() {
   const [error, setError] = useState('');
 
   const mailto = () => {
-    const subject = encodeURIComponent(`SnapVidly contact from ${name || 'a visitor'}`);
+    const subject = encodeURIComponent(
+      type === 'suggestion' ? `SnapVidly tool suggestion from ${name || 'a visitor'}` : `SnapVidly contact from ${name || 'a visitor'}`,
+    );
     const body = encodeURIComponent(`${message}\n\n— ${name}${email ? ` (${email})` : ''}`);
     window.location.href = `mailto:${site.email}?subject=${subject}&body=${body}`;
   };
@@ -32,7 +34,7 @@ export function ContactForm() {
       const res = await fetch('/api/contact', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name, email, message, company }),
+        body: JSON.stringify({ name, email, message, company, type }),
       });
       const data = (await res.json()) as { ok?: boolean; error?: string };
       if (res.ok && data.ok) {
@@ -58,9 +60,11 @@ export function ContactForm() {
 
   if (status === 'sent') {
     return (
-      <div className="card p-8 text-center">
+      <div id="suggestion-form" className="card p-8 text-center">
         <p className="text-lg font-semibold text-success">✓ Message sent</p>
-        <p className="mt-2 text-sm text-ink-muted">Thanks for reaching out — we usually reply within one business day.</p>
+        <p className="mt-2 text-sm text-ink-muted">
+          {type === 'suggestion' ? 'Thanks for the idea. We read every suggestion.' : 'Thanks for reaching out. We usually reply within one business day.'}
+        </p>
         <button type="button" onClick={() => setStatus('idle')} className="btn-ghost mt-5">
           Send another
         </button>
@@ -69,7 +73,29 @@ export function ContactForm() {
   }
 
   return (
-    <form onSubmit={onSubmit} className="card space-y-4 p-6">
+    <form id="suggestion-form" onSubmit={onSubmit} className="card space-y-4 p-6">
+      <div className="inline-flex rounded-lg border border-surface-border bg-surface-soft p-1" role="tablist" aria-label="Message type">
+        {(
+          [
+            ['contact', 'General'],
+            ['suggestion', 'Suggest a tool'],
+          ] as const
+        ).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={type === value}
+            onClick={() => setType(value)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors duration-200 ${
+              type === value ? 'bg-surface text-accent shadow-sm' : 'text-ink-muted hover:text-ink'
+            }`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="block">
           <span className="text-sm font-medium text-ink">Name</span>
@@ -93,12 +119,13 @@ export function ContactForm() {
         </label>
       </div>
       <label className="block">
-        <span className="text-sm font-medium text-ink">Message</span>
+        <span className="text-sm font-medium text-ink">{type === 'suggestion' ? 'What tool or improvement would you like to see?' : 'Message'}</span>
         <textarea
           value={message}
           onChange={(e) => setMessage(e.target.value)}
           required
           rows={5}
+          placeholder={type === 'suggestion' ? 'e.g. "Add a video-to-audiobook tool" or "The PDF editor could use a rotate button"' : undefined}
           className="mt-1.5 w-full rounded-lg border border-surface-border bg-surface px-3 py-2 text-ink focus:border-accent focus:outline-none"
         />
       </label>
@@ -123,7 +150,7 @@ export function ContactForm() {
       )}
 
       <button type="submit" disabled={status === 'sending'} className="btn-accent w-full sm:w-auto">
-        {status === 'sending' ? 'Sending…' : 'Send message'}
+        {status === 'sending' ? 'Sending…' : type === 'suggestion' ? 'Send suggestion' : 'Send message'}
       </button>
       <p className="text-xs text-ink-muted">
         Prefer email? Write to <a href={`mailto:${site.email}`} className="text-accent">{site.email}</a>.

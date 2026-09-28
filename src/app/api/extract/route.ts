@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { extractRequestSchema, validateExtractTarget } from '@/lib/validate';
 import { extract, EngineError } from '@/lib/engine';
+import { cachedExtract } from '@/lib/extractCache';
 import { checkRateLimit } from '@/lib/rateLimit';
 import { clientIp } from '@/lib/clientIp';
 
@@ -8,17 +9,29 @@ import { clientIp } from '@/lib/clientIp';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+// The body is only {url, platform}; anything larger is abuse, not a real request.
+const MAX_BODY_BYTES = 8_192;
+
 export async function POST(req: Request): Promise<NextResponse> {
   // 1. Rate limit (abuse / bandwidth protection).
-  const { success } = await checkRateLimit(clientIp(req));
+  const { success } = await checkRateLimit(clientIp(req.headers));
   if (!success) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment and try again.' }, { status: 429 });
   }
 
-  // 2. Parse + schema-validate the body.
+  // 2. Size-check, then parse + schema-validate the body. Content-Length is absent
+  // on a chunked request, so the byte count we actually read is the guard that holds.
+  if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
+  }
+
   let body: unknown;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw) > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
@@ -34,9 +47,12 @@ export async function POST(req: Request): Promise<NextResponse> {
     return NextResponse.json({ error: target.reason ?? 'Unsupported link.' }, { status: 400 });
   }
 
-  // 4. Extract (timeout + typed failures handled in the engine).
+  // 4. Extract (timeout + typed failures handled in the engine). Deduped by
+  // canonical link so trending videos cost one upstream call, not thousands.
   try {
-    const result = await extract(url, platform);
+    const result = await cachedExtract(url, platform, () => extract(url, platform));
+    // Still no-store to the client: responses can carry signed CDN URLs that
+    // expire, and they must not be shared between visitors by a proxy.
     return NextResponse.json(result, {
       headers: { 'Cache-Control': 'no-store' },
     });

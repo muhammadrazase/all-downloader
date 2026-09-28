@@ -3,7 +3,7 @@ import { ImageResponse } from 'next/og';
 export const size = { width: 180, height: 180 };
 export const contentType = 'image/png';
 
-/** Apple touch icon (iOS home-screen) — SnapVidly play mark via real <svg> path. */
+/** Apple touch icon (iOS home-screen) — a 2x2 tile grid (a tools hub, not a play mark). */
 export default function AppleIcon() {
   return new ImageResponse(
     (
@@ -18,7 +18,10 @@ export default function AppleIcon() {
         }}
       >
         <svg width="96" height="96" viewBox="0 0 24 24">
-          <path d="M8 5.5v13l11-6.5-11-6.5z" fill="#fff" />
+          <rect x="5.1" y="5.1" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="12.9" y="5.1" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="5.1" y="12.9" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="12.9" y="12.9" width="6" height="6" rx="1.7" fill="#fff" />
         </svg>
       </div>
     ),

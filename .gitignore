@@ -1,5 +1,6 @@
 /node_modules
 /.next
+/.next-e2e
 /out
 /build
 .DS_Store
@@ -16,3 +17,18 @@ next-env.d.ts
 
 # ffmpeg.wasm core (copied on postinstall)
 /public/ffmpeg/
+
+# pdf.js worker + Tesseract WASM core (copied on postinstall from node_modules)
+/public/pdf/pdf.worker.min.mjs
+/public/ocr/worker.min.js
+/public/ocr/tesseract-core-simd-lstm.wasm
+/public/ocr/tesseract-core-simd-lstm.wasm.js
+# eng.traineddata.gz is NOT ignored — fetched from tesseract-ocr/tessdata_fast
+# (not an npm package), so it must be committed for postinstall to detect it.
+
+# Playwright E2E artifacts
+/test-results/
+/playwright-report/
+
+# Admin panel SQLite database (owner config, secrets-at-rest — never committed)
+/data/

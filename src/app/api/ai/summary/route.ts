@@ -14,18 +14,24 @@ const MAX_BODY_BYTES = 8_192;
 const bodySchema = z.object({ url: z.string().trim().url().max(2048) });
 
 export async function POST(req: Request): Promise<NextResponse> {
-  const { success } = await checkAiRateLimit(clientIp(req));
+  const { success } = await checkAiRateLimit(clientIp(req.headers));
   if (!success) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment and try again.' }, { status: 429 });
   }
 
+  // Content-Length is absent on a chunked request, so the byte count we
+  // actually read is the guard that holds.
   if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
     return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
   }
 
   let body: unknown;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw) > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
@@ -56,7 +62,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = await summarizeUrl(url);
+    const result = await summarizeUrl(url, platform.key);
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     if (err instanceof AiError) {

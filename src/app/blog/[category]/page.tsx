@@ -1,17 +1,20 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { BlogCard } from '@/components/BlogCard';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { JsonLd } from '@/components/JsonLd';
-import { AdSlot } from '@/components/ads/AdSlot';
 import { getPostsByCategory, getAllCategories, CATEGORY_LABEL, type BlogCategory } from '@/lib/blog';
 import { PLATFORMS } from '@/lib/platforms';
 import { buildMetadata } from '@/lib/seo';
 import { breadcrumbSchema } from '@/lib/schema';
+import { isContentEnabled } from '@/lib/config/contentConfig';
+import { getBoolSetting } from '@/lib/config/settings.server';
 
 export const dynamic = 'force-static';
-export const dynamicParams = false;
+// true so a category's first post (published after the last build) makes the
+// category page itself renderable on first request, without a full redeploy.
+export const dynamicParams = true;
 
 export function generateStaticParams() {
   return getAllCategories().map((category) => ({ category }));
@@ -37,9 +40,10 @@ export async function generateMetadata({
 export default async function CategoryPage({ params }: { params: Promise<{ category: string }> }) {
   const { category } = await params;
   if (!isCategory(category)) notFound();
+  if (!getBoolSetting('blogEnabled', true)) redirect('/');
 
   const label = CATEGORY_LABEL[category];
-  const posts = getPostsByCategory(category);
+  const posts = getPostsByCategory(category).filter((p) => isContentEnabled('blog-post', p.slug));
   const platform = PLATFORMS[category];
   const crumbs = [
     { name: 'Home', path: '/' },
@@ -63,10 +67,6 @@ export default async function CategoryPage({ params }: { params: Promise<{ categ
           Open the {label} downloader
         </Link>
       </section>
-
-      <div className="container-page">
-        <AdSlot placement="rectangle" ezoicId={104} />
-      </div>
 
       <section className="container-page py-10">
         {posts.length === 0 ? (

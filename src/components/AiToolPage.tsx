@@ -4,6 +4,7 @@ import { FAQ } from './FAQ';
 import { Steps } from './Steps';
 import { Breadcrumbs } from './Breadcrumbs';
 import { JsonLd } from './JsonLd';
+import { TrackView } from './TrackView';
 import { AdSlot } from './ads/AdSlot';
 import { RelatedOffers } from './RelatedOffers';
 import type { AiTool } from '@/lib/aiTools';
@@ -16,6 +17,7 @@ export function AiToolPage({ tool }: { tool: AiTool }) {
   ];
   return (
     <>
+      <TrackView tool={tool.slug} />
       <JsonLd data={webApplicationSchema(tool.metaTitle, `/${tool.slug}`, tool.metaDescription)} />
       <JsonLd data={faqSchema(tool.faqs)} />
       <JsonLd data={howToSchema(`How to use ${tool.name.toLowerCase()}`, tool.steps)} />
@@ -29,7 +31,7 @@ export function AiToolPage({ tool }: { tool: AiTool }) {
         <span className="inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface-soft px-3 py-1 text-sm font-medium text-ink-muted">
           <span className="h-2 w-2 rounded-full bg-accent" /> AI-powered · free
         </span>
-        <h1 className="mx-auto mt-6 max-w-3xl text-3xl font-bold text-ink sm:text-4xl">{tool.h1}</h1>
+        <h1 className="mx-auto mt-6 max-w-3xl text-4xl font-bold text-ink sm:text-5xl">{tool.h1}</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-ink-muted">{tool.intro}</p>
         <div className="mx-auto mt-8 max-w-2xl text-left">
           <AiToolBox tool={tool.toolType} />

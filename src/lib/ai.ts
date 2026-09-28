@@ -1,5 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
+import { getSetting, getBoolSetting } from './config/settings.server';
+import { metaFromResponse, usableProviders, recordAiCall, type AiProvider } from './aiQuota';
 
 /**
  * AI provider abstraction — the $0-forever core.
@@ -15,7 +17,7 @@ import { basename } from 'node:path';
  *   - Free tiers stay free: callers cache by content, we keep prompts small.
  */
 
-export type AiErrorCode = 'not_configured' | 'provider_failed' | 'too_long' | 'empty';
+export type AiErrorCode = 'not_configured' | 'provider_failed' | 'too_long' | 'empty' | 'at_capacity';
 
 export class AiError extends Error {
   readonly code: AiErrorCode;
@@ -28,19 +30,31 @@ export class AiError extends Error {
   }
 }
 
-const GROQ_KEY = process.env.GROQ_API_KEY || '';
-const GEMINI_KEY = process.env.GEMINI_API_KEY || '';
-const GROQ_MODEL = process.env.GROQ_MODEL || 'llama-3.3-70b-versatile';
-const GROQ_WHISPER_MODEL = process.env.GROQ_WHISPER_MODEL || 'whisper-large-v3';
-const GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Lazy accessors (DB > env > default), not module-level consts: an admin-panel
+// key save must take effect on the next call, not the next process restart.
+const groqModel = () => getSetting('GROQ_MODEL') || 'llama-3.3-70b-versatile';
+const groqWhisperModel = () => getSetting('GROQ_WHISPER_MODEL') || 'whisper-large-v3';
+const geminiModel = () => getSetting('GEMINI_MODEL') || 'gemini-2.5-flash';
+
+// One key per provider, deliberately: pooling several free accounts to multiply
+// quota is against both providers' terms, and the downside is a ban that kills
+// the feature permanently. Free capacity is stretched by caching + budget caps
+// instead (see aiCache.ts / aiQuota.ts).
+const groqKey = () => getSetting('GROQ_API_KEY') || '';
+const geminiKey = () => getSetting('GEMINI_API_KEY') || '';
+const hasGroqKey = () => Boolean(groqKey());
+const hasGeminiKey = () => Boolean(geminiKey());
 
 const TRANSCRIBE_TIMEOUT_MS = 120_000; // Whisper on a long clip
 const CHAT_TIMEOUT_MS = 45_000;
 
 /** Any AI feature usable at all? (chat can run on Groq OR Gemini). */
-export const aiConfigured = (): boolean => Boolean(GROQ_KEY || GEMINI_KEY);
+export const aiConfigured = (): boolean =>
+  getBoolSetting('aiEnabled', true) && (hasGroqKey() || hasGeminiKey());
 /** Transcription runs on Groq Whisper (best) OR Gemini's multimodal audio input. */
-export const transcribeConfigured = (): boolean => Boolean(GROQ_KEY || GEMINI_KEY);
+export const transcribeConfigured = (): boolean => aiConfigured();
+
+const hasKeyFor = (provider: AiProvider) => (provider === 'groq' ? hasGroqKey() : hasGeminiKey());
 
 // Gemini inline audio must fit in one request (~20 MB). At our 48 kbps mono this
 // is ~40 min of audio; the 30-min duration cap upstream keeps us comfortably under.
@@ -59,30 +73,40 @@ export interface Transcription {
   provider: 'groq' | 'gemini';
 }
 
+/** Raised when every provider is over its free daily budget or rate-limited. */
+export function atCapacityError(): AiError {
+  return new AiError('at_capacity', 'AI tools are at capacity right now. Please try again in a few hours.', 503);
+}
+
 /**
- * Transcribe a local audio file. Tries Groq Whisper first (cheapest + best
- * timestamps), then falls back to Gemini's multimodal audio input — so the
- * feature works whether the operator has a Groq key, a Gemini key, or both.
+ * Transcribe a local audio file. Groq Whisper leads (best timestamps); Gemini's
+ * multimodal audio input takes over when Groq has no key or no budget left.
  * `mode: 'translate'` returns English regardless of the source language.
  */
 export async function transcribeAudio(
   filePath: string,
   mode: 'transcribe' | 'translate' = 'transcribe',
 ): Promise<Transcription> {
-  if (!GROQ_KEY && !GEMINI_KEY) {
+  if (!transcribeConfigured()) {
     throw new AiError('not_configured', 'Transcription is not enabled on this server yet.', 503);
   }
 
-  if (GROQ_KEY) {
+  const order = usableProviders(['groq', 'gemini']).filter(hasKeyFor);
+  if (!order.length) throw atCapacityError();
+
+  let lastError: unknown;
+  for (const provider of order) {
     try {
-      return await groqTranscribe(filePath, mode);
+      return provider === 'groq' ? await groqTranscribe(filePath, mode) : await geminiTranscribe(filePath, mode);
     } catch (e) {
       // A real "no speech"/"too long" result shouldn't trigger a wasteful retry.
       if (e instanceof AiError && (e.code === 'empty' || e.code === 'too_long')) throw e;
-      if (!GEMINI_KEY) throw e;
+      lastError = e;
     }
   }
-  return geminiTranscribe(filePath, mode);
+  throw lastError instanceof AiError
+    ? lastError
+    : new AiError('provider_failed', 'The transcription service is busy. Please try again shortly.', 502);
 }
 
 async function groqTranscribe(
@@ -92,7 +116,7 @@ async function groqTranscribe(
   const buf = readFileSync(filePath);
   const form = new FormData();
   form.append('file', new Blob([buf], { type: 'audio/mpeg' }), basename(filePath));
-  form.append('model', GROQ_WHISPER_MODEL);
+  form.append('model', groqWhisperModel());
   form.append('response_format', 'verbose_json');
   form.append('temperature', '0');
 
@@ -105,19 +129,23 @@ async function groqTranscribe(
   try {
     res = await fetch(endpoint, {
       method: 'POST',
-      headers: { authorization: `Bearer ${GROQ_KEY}` },
+      headers: { authorization: `Bearer ${groqKey()}` },
       body: form,
       signal: AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS),
     });
   } catch {
+    recordAiCall('groq', 'error');
     throw new AiError('provider_failed', 'The transcription service timed out. Try a shorter video.', 504);
   }
 
   if (!res.ok) {
+    recordAiCall('groq', res.status === 429 ? 'rate_limited' : 'error', metaFromResponse(res));
     // 413 = file too big (very long video); everything else is a generic provider failure.
     if (res.status === 413) throw new AiError('too_long', 'That video is too long to transcribe. Try one under 30 minutes.', 413);
+    if (res.status === 429) throw atCapacityError();
     throw new AiError('provider_failed', 'The transcription service is busy. Please try again shortly.', 502);
   }
+  recordAiCall('groq', 'ok', metaFromResponse(res));
 
   const data = (await res.json()) as { text?: string; language?: string; segments?: RawSegment[] };
   const text = (data.text ?? '').trim();
@@ -161,7 +189,7 @@ async function geminiTranscribe(
   filePath: string,
   mode: 'transcribe' | 'translate',
 ): Promise<Transcription> {
-  if (!GEMINI_KEY) throw new AiError('not_configured', 'Transcription is not enabled on this server yet.', 503);
+  if (!geminiKey()) throw new AiError('not_configured', 'Transcription is not enabled on this server yet.', 503);
   const buf = readFileSync(filePath);
   if (buf.byteLength > GEMINI_INLINE_MAX_BYTES) {
     throw new AiError('too_long', 'That video is too long to transcribe. Try a shorter one.', 413);
@@ -170,7 +198,7 @@ async function geminiTranscribe(
   let res: Response;
   try {
     res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${geminiKey()}`,
       {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -190,11 +218,15 @@ async function geminiTranscribe(
       },
     );
   } catch {
+    recordAiCall('gemini', 'error');
     throw new AiError('provider_failed', 'The transcription service timed out. Try a shorter video.', 504);
   }
   if (!res.ok) {
+    recordAiCall('gemini', res.status === 429 ? 'rate_limited' : 'error', metaFromResponse(res));
+    if (res.status === 429) throw atCapacityError();
     throw new AiError('provider_failed', 'The transcription service is busy. Please try again shortly.', 502);
   }
+  recordAiCall('gemini', 'ok', metaFromResponse(res));
 
   const data = (await res.json()) as { candidates?: { content?: { parts?: { text?: string }[] } }[] };
   const raw = data.candidates?.[0]?.content?.parts?.map((p) => p.text ?? '').join('').trim() ?? '';
@@ -233,24 +265,32 @@ export interface ChatResult {
  * One reasoning call. Tries Groq first, falls back to Gemini on failure so a
  * single provider's rate limit or outage never takes the feature down.
  * `json: true` forces the provider into strict JSON mode (guaranteed parseable).
+ *
+ * `preferProvider: 'gemini'` flips that order. This exists for long
+ * documents (PDF summaries): Gemini's free tier supports roughly a 1M-token
+ * context window, so a whole document can be sent in one call rather than
+ * truncated to fit the much smaller budget the video pipeline was built
+ * around. Video routes never pass this — their behavior is unchanged.
  */
-export async function chat(system: string, user: string, opts: { json?: boolean } = {}): Promise<ChatResult> {
+export async function chat(
+  system: string,
+  user: string,
+  opts: { json?: boolean; preferProvider?: 'groq' | 'gemini' } = {},
+): Promise<ChatResult> {
   if (!aiConfigured()) {
     throw new AiError('not_configured', 'AI features are not enabled on this server yet.', 503);
   }
 
-  if (GROQ_KEY) {
+  const base: AiProvider[] = opts.preferProvider === 'gemini' ? ['gemini', 'groq'] : ['groq', 'gemini'];
+  const order = usableProviders(base).filter(hasKeyFor);
+  if (!order.length) throw atCapacityError();
+
+  for (const provider of order) {
     try {
-      return { text: await groqChat(system, user, opts.json), provider: 'groq' };
+      const text = provider === 'groq' ? await groqChat(system, user, opts.json) : await geminiChat(system, user, opts.json);
+      return { text, provider };
     } catch {
-      if (!GEMINI_KEY) throw new AiError('provider_failed', 'The AI service is busy. Please try again shortly.', 502);
-    }
-  }
-  if (GEMINI_KEY) {
-    try {
-      return { text: await geminiChat(system, user, opts.json), provider: 'gemini' };
-    } catch {
-      /* fall through to the shared error */
+      /* try the next provider in order */
     }
   }
 
@@ -260,9 +300,9 @@ export async function chat(system: string, user: string, opts: { json?: boolean 
 async function groqChat(system: string, user: string, json?: boolean): Promise<string> {
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
-    headers: { authorization: `Bearer ${GROQ_KEY}`, 'content-type': 'application/json' },
+    headers: { authorization: `Bearer ${groqKey()}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model: GROQ_MODEL,
+      model: groqModel(),
       temperature: 0.3,
       ...(json ? { response_format: { type: 'json_object' } } : {}),
       messages: [
@@ -272,7 +312,11 @@ async function groqChat(system: string, user: string, json?: boolean): Promise<s
     }),
     signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
   });
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) {
+    recordAiCall('groq', res.status === 429 ? 'rate_limited' : 'error', metaFromResponse(res));
+    throw new Error(String(res.status));
+  }
+  recordAiCall('groq', 'ok', metaFromResponse(res));
   const data = (await res.json()) as { choices?: { message?: { content?: string } }[] };
   const text = data.choices?.[0]?.message?.content?.trim();
   if (!text) throw new Error('empty');
@@ -281,7 +325,7 @@ async function groqChat(system: string, user: string, json?: boolean): Promise<s
 
 async function geminiChat(system: string, user: string, json?: boolean): Promise<string> {
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${geminiModel()}:generateContent?key=${geminiKey()}`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -293,7 +337,11 @@ async function geminiChat(system: string, user: string, json?: boolean): Promise
       signal: AbortSignal.timeout(CHAT_TIMEOUT_MS),
     },
   );
-  if (!res.ok) throw new Error(String(res.status));
+  if (!res.ok) {
+    recordAiCall('gemini', res.status === 429 ? 'rate_limited' : 'error', metaFromResponse(res));
+    throw new Error(String(res.status));
+  }
+  recordAiCall('gemini', 'ok', metaFromResponse(res));
   const data = (await res.json()) as {
     candidates?: { content?: { parts?: { text?: string }[] } }[];
   };

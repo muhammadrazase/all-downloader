@@ -9,9 +9,12 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const VALID_QUALITY = /^(audio|360|480|720|1080|1440|2160)$/;
+// This route validates with validateExtractTarget and never runs the Zod schema,
+// so it needs its own copy of the schema's 2048-char URL ceiling.
+const MAX_URL_LENGTH = 2048;
 
 export async function GET(req: Request): Promise<Response> {
-  const { success } = await checkRateLimit(clientIp(req));
+  const { success } = await checkRateLimit(clientIp(req.headers));
   if (!success) return json({ error: 'Too many requests. Please wait a moment.' }, 429);
 
   const { searchParams } = new URL(req.url);
@@ -20,8 +23,11 @@ export async function GET(req: Request): Promise<Response> {
   const quality = searchParams.get('q') ?? '';
 
   // Validate platform, quality, then the URL (SSRF + host whitelist).
-  if (!(platform in PLATFORMS)) return json({ error: 'Unsupported platform.' }, 400);
+  // hasOwn, not `in`: `in` walks the prototype chain, so `p=__proto__` passed the
+  // guard and then crashed on PLATFORMS['__proto__'].hostPattern being undefined.
+  if (!Object.hasOwn(PLATFORMS, platform)) return json({ error: 'Unsupported platform.' }, 400);
   if (!VALID_QUALITY.test(quality)) return json({ error: 'Invalid quality.' }, 400);
+  if (url.length > MAX_URL_LENGTH) return json({ error: 'That link is too long.' }, 413);
   const check = validateExtractTarget(url, platform as PlatformKey);
   if (!check.ok) return json({ error: check.reason ?? 'Invalid link.' }, 400);
 

@@ -20,12 +20,13 @@ const bodySchema = z.object({
 
 export async function POST(req: Request): Promise<NextResponse> {
   // 1. Rate-limit first (stricter AI bucket) — hostile probing costs nothing.
-  const { success } = await checkAiRateLimit(clientIp(req));
+  const { success } = await checkAiRateLimit(clientIp(req.headers));
   if (!success) {
     return NextResponse.json({ error: 'Too many requests. Please wait a moment and try again.' }, { status: 429 });
   }
 
-  // 2. Reject oversized bodies before buffering them into memory.
+  // 2. Reject oversized bodies. Content-Length is absent on a chunked request,
+  //    so the byte count we actually read is the guard that holds.
   if (Number(req.headers.get('content-length') ?? 0) > MAX_BODY_BYTES) {
     return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
   }
@@ -33,7 +34,11 @@ export async function POST(req: Request): Promise<NextResponse> {
   // 3. Parse + schema-validate.
   let body: unknown;
   try {
-    body = await req.json();
+    const raw = await req.text();
+    if (Buffer.byteLength(raw) > MAX_BODY_BYTES) {
+      return NextResponse.json({ error: 'Request too large.' }, { status: 413 });
+    }
+    body = JSON.parse(raw);
   } catch {
     return NextResponse.json({ error: 'Invalid request.' }, { status: 400 });
   }
@@ -66,7 +71,7 @@ export async function POST(req: Request): Promise<NextResponse> {
   }
 
   try {
-    const result = await transcribeUrl(url, mode);
+    const result = await transcribeUrl(url, platform.key, mode);
     return NextResponse.json(result, { headers: { 'Cache-Control': 'no-store' } });
   } catch (err) {
     if (err instanceof AiError) {

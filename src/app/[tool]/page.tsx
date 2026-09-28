@@ -1,4 +1,4 @@
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
 import { DownloaderBox } from '@/components/DownloaderBox';
@@ -9,8 +9,12 @@ import { FAQ } from '@/components/FAQ';
 import { Steps } from '@/components/Steps';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { JsonLd } from '@/components/JsonLd';
+import { TrackView } from '@/components/TrackView';
 import { PLATFORM_LIST, getPlatformBySlug } from '@/lib/platforms';
 import { buildMetadata } from '@/lib/seo';
+import { site } from '@/lib/site';
+import { getSeoOverride, isContentEnabled } from '@/lib/config/contentConfig';
+import { platformKeywords } from '@/lib/seoDefaults';
 import {
   webApplicationSchema,
   faqSchema,
@@ -34,22 +38,18 @@ export async function generateMetadata({
   const { tool } = await params;
   const p = getPlatformBySlug(tool);
   if (!p) return {};
+
+  // Admin per-tool SEO override — see /admin/tools.
+  const override = getSeoOverride('platform', p.key);
+  const title = override?.title || p.metaTitle;
   return buildMetadata({
-    title: p.metaTitle,
-    description: p.metaDescription,
-    path: `/${p.slug}`,
-    keywords: [
-      p.keyword,
-      `${p.name} downloader`,
-      `${p.name} video downloader`,
-      `download ${p.name} videos`,
-      `${p.name} downloader online`,
-      `save ${p.name} video`,
-      'no watermark',
-      'HD',
-      'MP4',
-      'MP3',
-    ],
+    title,
+    description: override?.description || p.metaDescription,
+    path: override?.canonical || `/${p.slug}`,
+    noindex: override?.noindex,
+    // Brand-colored OG card per platform, unless an admin set a custom image.
+    image: override?.ogImage || `${site.url}/api/og?title=${encodeURIComponent(title)}&color=${p.brandColor.replace('#', '')}`,
+    keywords: override?.keywords || platformKeywords(p),
   });
 }
 
@@ -57,6 +57,7 @@ export default async function ToolPage({ params }: { params: Promise<{ tool: str
   const { tool } = await params;
   const p = getPlatformBySlug(tool);
   if (!p) notFound();
+  if (!isContentEnabled('platform', p.key)) redirect('/');
 
   const crumbs = [
     { name: 'Home', path: '/' },
@@ -65,6 +66,7 @@ export default async function ToolPage({ params }: { params: Promise<{ tool: str
 
   return (
     <>
+      <TrackView tool={p.slug} />
       <JsonLd data={webApplicationSchema(p.metaTitle, `/${p.slug}`, p.metaDescription)} />
       <JsonLd data={faqSchema(p.faqs)} />
       <JsonLd data={howToSchema(`How to download ${p.name} videos`, [...p.pcSteps])} />
@@ -79,12 +81,12 @@ export default async function ToolPage({ params }: { params: Promise<{ tool: str
         <div className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ backgroundColor: `${p.brandColor}14` }}>
           <PlatformIcon platform={p.key} color={p.brandColor} className="h-7 w-7" />
         </div>
-        <h1 className="mx-auto max-w-3xl text-3xl font-bold text-ink sm:text-4xl">{p.h1}</h1>
+        <h1 className="mx-auto max-w-3xl text-4xl font-bold text-ink sm:text-5xl">{p.h1}</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-ink-muted">{p.intro}</p>
 
         <div className="mx-auto mt-8 max-w-2xl">
           <DownloaderBox platformKey={p.key} autoFocus />
-          <p className="mt-3 text-sm text-ink-faint">Example: {p.urlExample}</p>
+          <p className="mt-3 break-all text-sm text-ink-faint">Example: {p.urlExample}</p>
         </div>
       </section>
 

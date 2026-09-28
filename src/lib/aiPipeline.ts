@@ -2,12 +2,17 @@ import { transcribeAudio, chat, type Transcription } from './ai';
 import { extractAudio } from './aiAudio';
 import { toSrt, toVtt } from './subtitles';
 import { cacheKey, getCached, setCached } from './aiCache';
+import type { PlatformKey } from './platforms';
 
 /**
  * Orchestration layer used by the AI routes. Each step caches by content so a
  * repeat request for the same URL never re-hits a provider — the core of the
  * $0-forever budget. The routes handle validation/SSRF/rate-limit before calling in.
  */
+
+// Cache keys carry the prompt/output-format version so a change to either can
+// never serve a result produced by the old one (same rule as the PDF route).
+const PROMPT_VERSION = 'v1';
 
 export interface TranscriptResult {
   text: string;
@@ -20,13 +25,14 @@ export interface TranscriptResult {
 /** URL → transcript + subtitle files (cached). `mode: 'translate'` → English. */
 export async function transcribeUrl(
   url: string,
+  platform: PlatformKey,
   mode: 'transcribe' | 'translate' = 'transcribe',
 ): Promise<TranscriptResult> {
-  const key = cacheKey('transcript', url, mode);
+  const key = cacheKey('transcript', url, `${PROMPT_VERSION}:${mode}`);
   const cached = await getCached<TranscriptResult>(key);
   if (cached) return cached;
 
-  const audio = await extractAudio(url);
+  const audio = await extractAudio(url, platform);
   let transcription: Transcription;
   try {
     transcription = await transcribeAudio(audio.filePath, mode);
@@ -62,12 +68,12 @@ const SUMMARY_SYSTEM =
   'Output ONLY minified JSON: {"summary":string,"points":string[]}. No markdown, no code fences, no extra keys.';
 
 /** URL → transcript (cached) → AI summary + key points (cached). */
-export async function summarizeUrl(url: string): Promise<SummaryResult> {
-  const key = cacheKey('summary', url);
+export async function summarizeUrl(url: string, platform: PlatformKey): Promise<SummaryResult> {
+  const key = cacheKey('summary', url, PROMPT_VERSION);
   const cached = await getCached<SummaryResult>(key);
   if (cached) return cached;
 
-  const { text } = await transcribeUrl(url);
+  const { text } = await transcribeUrl(url, platform);
 
   const { text: raw, provider } = await chat(
     SUMMARY_SYSTEM,

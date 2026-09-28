@@ -5,6 +5,7 @@ import { FAQ } from './FAQ';
 import { Steps } from './Steps';
 import { Breadcrumbs } from './Breadcrumbs';
 import { JsonLd } from './JsonLd';
+import { TrackView } from './TrackView';
 import { AdSlot } from './ads/AdSlot';
 import type { ImageTool } from '@/lib/imageTools';
 import type { PlatformKey } from '@/lib/platforms';
@@ -21,6 +22,7 @@ export function ImageToolPage({ tool }: { tool: ImageTool }) {
 
   return (
     <>
+      <TrackView tool={tool.slug} />
       <JsonLd data={webApplicationSchema(tool.metaTitle, `/${tool.slug}`, tool.metaDescription)} />
       <JsonLd data={faqSchema(tool.faqs)} />
       <JsonLd data={howToSchema(`How to download a ${tool.name}`, tool.steps)} />
@@ -34,11 +36,11 @@ export function ImageToolPage({ tool }: { tool: ImageTool }) {
         <div className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ backgroundColor: `${tool.brandColor}14` }}>
           <PlatformIcon platform={iconKey} color={tool.brandColor} className="h-7 w-7" />
         </div>
-        <h1 className="mx-auto max-w-3xl text-3xl font-bold text-ink sm:text-4xl">{tool.h1}</h1>
+        <h1 className="mx-auto max-w-3xl text-4xl font-bold text-ink sm:text-5xl">{tool.h1}</h1>
         <p className="mx-auto mt-4 max-w-2xl text-lg text-ink-muted">{tool.intro}</p>
         <div className="mx-auto mt-8 max-w-2xl">
           <ImageDownloaderBox toolKey={tool.key} autoFocus />
-          <p className="mt-3 text-sm text-ink-faint">Example: {tool.urlExample}</p>
+          <p className="mt-3 break-all text-sm text-ink-faint">Example: {tool.urlExample}</p>
         </div>
       </section>
 

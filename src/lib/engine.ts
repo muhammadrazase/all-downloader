@@ -7,6 +7,7 @@ import type { PlatformKey } from './platforms';
 import { humanFormatLabel } from './format';
 import { EngineError } from './engine-error';
 import { extractViaApi } from './engine-api';
+import { getSetting } from './config/settings.server';
 
 export { EngineError };
 
@@ -39,9 +40,30 @@ const VIDEO_TIERS = [2160, 1440, 1080, 720, 480, 360];
 
 let activeDownloads = 0;
 
-/** Shared yt-dlp flags for cookies/proxy when configured. */
-function extraArgs(): string[] {
-  const a: string[] = [];
+/**
+ * Restricts yt-dlp to the extractor family that owns each platform. Without
+ * this, a whitelisted host whose path yt-dlp doesn't recognize falls through
+ * to the generic extractor, which fetches (and follows redirects for) whatever
+ * is at that URL — a real SSRF path, made worse by `t.co` (Twitter's own URL
+ * shortener) being an attacker-controlled open redirector on the whitelist.
+ */
+const EXTRACTOR_FILTER: Record<PlatformKey, string> = {
+  tiktok: 'tiktok.*',
+  instagram: 'instagram.*',
+  youtube: 'youtube.*',
+  facebook: 'facebook.*',
+  linkedin: 'linkedin.*',
+  twitter: 'twitter.*',
+  pinterest: 'pinterest.*',
+  reddit: 'reddit.*',
+  vimeo: 'vimeo.*',
+  twitch: 'twitch.*',
+  tumblr: 'tumblr.*',
+};
+
+/** Shared yt-dlp flags for cookies/proxy/extractor restriction when configured. */
+function extraArgs(platform: PlatformKey): string[] {
+  const a: string[] = ['--use-extractors', EXTRACTOR_FILTER[platform]];
   if (COOKIES) a.push('--cookies', COOKIES);
   if (PROXY) a.push('--proxy', PROXY);
   return a;
@@ -53,10 +75,12 @@ export async function extract(url: string, platform: PlatformKey): Promise<Extra
   //   1. RapidAPI downloader  → free/Vercel path, returns direct CDN URLs
   //   2. Remote engine service → ENGINE_URL
   //   3. Local yt-dlp          → self-host / dev (default)
-  if (process.env.RAPIDAPI_KEY && process.env.RAPIDAPI_HOST) return extractViaApi(url, platform);
-  if (process.env.ENGINE_URL) return extractViaRemote(url, platform);
+  const rapidKey = getSetting('RAPIDAPI_KEY');
+  const rapidHost = getSetting('RAPIDAPI_HOST');
+  if (rapidKey && rapidHost) return extractViaApi(url, platform, { key: rapidKey, host: rapidHost });
+  if (getSetting('ENGINE_URL')) return extractViaRemote(url, platform);
 
-  const json = await runYtDlpJson(url);
+  const json = await runYtDlpJson(url, platform);
   const title = typeof json.title === 'string' ? json.title : 'video';
   const thumbnail = typeof json.thumbnail === 'string' ? json.thumbnail : undefined;
   const duration = typeof json.duration === 'number' ? json.duration : undefined;
@@ -67,11 +91,12 @@ export async function extract(url: string, platform: PlatformKey): Promise<Extra
 }
 
 async function extractViaRemote(url: string, platform: PlatformKey): Promise<ExtractResult> {
-  const r = await fetch(`${process.env.ENGINE_URL}/extract`, {
+  const engineKey = getSetting('ENGINE_KEY');
+  const r = await fetch(`${getSetting('ENGINE_URL')}/extract`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
-      ...(process.env.ENGINE_KEY ? { 'x-api-key': process.env.ENGINE_KEY } : {}),
+      ...(engineKey ? { 'x-api-key': engineKey } : {}),
     },
     body: JSON.stringify({ url, platform }),
     signal: AbortSignal.timeout(EXTRACT_TIMEOUT_MS),
@@ -86,20 +111,32 @@ interface RawFormat {
   height?: number;
   vcodec?: string;
   acodec?: string;
+  video_ext?: string;
+  audio_ext?: string;
 }
+
+const FALLBACK_HEIGHT = 720; // matches sanitizeHeight()'s own default
 
 /** Turn yt-dlp's raw formats into a clean menu: video tiers ≤ source max, + MP3. */
 function buildOptions(raw: RawFormat[]): QualityOption[] {
   const heights = new Set<number>();
+  let hasVideoNoHeight = false;
   let hasAudio = false;
   for (const f of raw) {
-    if (f.vcodec && f.vcodec !== 'none' && typeof f.height === 'number') heights.add(f.height);
-    if (f.acodec && f.acodec !== 'none') hasAudio = true;
+    const isVideo = (f.vcodec && f.vcodec !== 'none') || (f.video_ext && f.video_ext !== 'none');
+    if (isVideo) {
+      // Some extractors (e.g. LinkedIn's HLS-backed formats) never populate
+      // height/vcodec even though video_ext proves a video stream exists.
+      if (typeof f.height === 'number') heights.add(f.height);
+      else hasVideoNoHeight = true;
+    }
+    if ((f.acodec && f.acodec !== 'none') || (f.audio_ext && f.audio_ext !== 'none')) hasAudio = true;
   }
   const max = heights.size ? Math.max(...heights) : 0;
 
   const tiers = VIDEO_TIERS.filter((h) => h <= max);
   if (!tiers.length && max > 0) tiers.push(max); // very low-res source
+  if (!tiers.length && hasVideoNoHeight) tiers.push(FALLBACK_HEIGHT); // unknown-resolution source
 
   const options: QualityOption[] = tiers.map((h) => ({
     quality: String(h),
@@ -107,7 +144,7 @@ function buildOptions(raw: RawFormat[]): QualityOption[] {
     kind: 'video',
   }));
 
-  if (hasAudio || max > 0) {
+  if (hasAudio || tiers.length > 0) {
     options.push({ quality: 'audio', label: humanFormatLabel('audio', 'mp3'), kind: 'audio' });
   }
   return options;
@@ -127,11 +164,13 @@ export async function prepareDownload(
   quality: string,
   platform: PlatformKey,
 ): Promise<PreparedDownload> {
-  if (process.env.ENGINE_URL) {
+  const engineUrl = getSetting('ENGINE_URL');
+  if (engineUrl) {
     // Production: let the engine service stream the file back to us.
+    const engineKey = getSetting('ENGINE_KEY');
     const r = await fetch(
-      `${process.env.ENGINE_URL}/download?u=${encodeURIComponent(url)}&p=${platform}&q=${quality}`,
-      { headers: process.env.ENGINE_KEY ? { 'x-api-key': process.env.ENGINE_KEY } : {} },
+      `${engineUrl}/download?u=${encodeURIComponent(url)}&p=${platform}&q=${quality}`,
+      { headers: engineKey ? { 'x-api-key': engineKey } : {} },
     );
     if (!r.ok || !r.body) throw new EngineError('Could not prepare this download.', 502);
     const { Readable } = await import('node:stream');
@@ -166,11 +205,19 @@ export async function prepareDownload(
   };
 
   try {
+    // Codec preference goes first: H.264 + AAC plays everywhere (phones, TVs,
+    // older players), while yt-dlp's own `bestvideo` ranks AV1/VP9 highest for
+    // efficiency and would otherwise hand out files many devices can't decode.
+    // The trailing `/best` covers sources whose formats never report a height
+    // (some extractors, e.g. LinkedIn's HLS-backed formats, always leave it
+    // null) — without it, a height-based filter matches nothing and the
+    // download fails even though a perfectly good file exists.
+    const h = sanitizeHeight(quality);
     const args = isAudio
       ? ['-x', '--audio-format', 'mp3', '--audio-quality', '0', '-o', outTemplate]
       : [
           '-f',
-          `bestvideo[height<=${sanitizeHeight(quality)}]+bestaudio/best[height<=${sanitizeHeight(quality)}]`,
+          `bestvideo[height<=${h}][vcodec^=avc1]+bestaudio[acodec^=mp4a]/bestvideo[height<=${h}]+bestaudio/best[height<=${h}]/best`,
           '--merge-output-format',
           'mp4',
           '-o',
@@ -178,7 +225,7 @@ export async function prepareDownload(
         ];
     args.push('--max-filesize', `${MAX_FILESIZE_MB}M`);
     if (FFMPEG) args.push('--ffmpeg-location', FFMPEG);
-    args.push('--no-warnings', '--no-playlist', ...extraArgs(), url);
+    args.push('--no-warnings', '--no-playlist', ...extraArgs(platform), url);
 
     await runYtDlp(args, DOWNLOAD_TIMEOUT_MS);
 
@@ -217,9 +264,9 @@ function filenameFromDisposition(cd: string | null): string | undefined {
 }
 
 // ── yt-dlp process helpers (args array, timeout, bounded output) ─────
-function runYtDlpJson(url: string): Promise<Record<string, unknown>> {
+function runYtDlpJson(url: string, platform: PlatformKey): Promise<Record<string, unknown>> {
   return new Promise((resolve, reject) => {
-    const child = spawn(YTDLP, ['-J', '--no-warnings', '--no-playlist', ...extraArgs(), url], {
+    const child = spawn(YTDLP, ['-J', '--no-warnings', '--no-playlist', ...extraArgs(platform), url], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';

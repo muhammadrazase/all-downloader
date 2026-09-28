@@ -63,6 +63,11 @@ const config: Config = {
         content: '72rem',
         prose: '44rem',
       },
+      transitionTimingFunction: {
+        // Named entrance curve for triggered UI (drawers, panels) — steep start,
+        // gentle settle. Keeps easing config-driven instead of ad hoc per component.
+        enter: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      },
       keyframes: {
         'fade-up': {
           '0%': { opacity: '0', transform: 'translateY(6px)' },
@@ -71,7 +76,10 @@ const config: Config = {
         spin: { to: { transform: 'rotate(360deg)' } },
       },
       animation: {
-        'fade-up': 'fade-up 0.25s ease-out both',
+        // Same curve as `enter` above — cubic-bezier(0.22,1,0.36,1) can't be
+        // referenced by name inside a raw animation shorthand, so it's spelled
+        // out here to stay in sync with it.
+        'fade-up': 'fade-up 0.25s cubic-bezier(0.22, 1, 0.36, 1) both',
       },
     },
   },

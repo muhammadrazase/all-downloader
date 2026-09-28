@@ -282,7 +282,10 @@ export const PLATFORMS: Record<PlatformKey, Platform> = {
     slug: 'pinterest-video-downloader',
     keyword: 'Pinterest video downloader',
     brandColor: '#E60023',
-    hostPattern: /^https?:\/\/([\w-]+\.)?(pinterest\.[\w.]+|pin\.it)\//i,
+    // Explicit ccTLD list (mirrors yt-dlp's own PinterestBaseIE). A generic
+    // `pinterest\.[\w.]+` would whitelist any `pinterest.<attacker>` host — SSRF.
+    hostPattern:
+      /^https?:\/\/([\w-]+\.)?(pinterest\.(?:com|fr|de|ch|jp|cl|ca|it|co\.uk|nz|ru|com\.au|at|pt|co\.kr|es|com\.mx|dk|ph|th|com\.uy|co|nl|info|kr|ie|vn|com\.vn|ec|mx|in|pe|co\.at|hu|co\.in|co\.nz|id|com\.ec|com\.py|tw|be|uk|com\.bo|com\.pe)|pin\.it)\//i,
     urlExample: 'https://www.pinterest.com/pin/1234567890/',
     metaTitle: 'Pinterest Video Downloader — Save Pinterest Videos & Pins Free',
     metaDescription:
@@ -478,8 +481,9 @@ export const PLATFORM_LIST: Platform[] = Object.values(PLATFORMS);
 export const getPlatformBySlug = (slug: string): Platform | undefined =>
   PLATFORM_LIST.find((p) => p.slug === slug);
 
+/** hasOwn guards against inherited keys ('__proto__', 'constructor') returning a non-Platform. */
 export const getPlatformByKey = (key: string): Platform | undefined =>
-  (PLATFORMS as Record<string, Platform>)[key];
+  Object.hasOwn(PLATFORMS, key) ? (PLATFORMS as Record<string, Platform>)[key] : undefined;
 
 /** Detect platform from a pasted URL — powers the universal home box (no dropdown). */
 export const detectPlatform = (url: string): Platform | undefined =>

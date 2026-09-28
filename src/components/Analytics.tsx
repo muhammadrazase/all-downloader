@@ -1,15 +1,15 @@
 'use client';
 
 import Script from 'next/script';
-import { site } from '@/lib/site';
 
 /**
  * Analytics loader — renders Plausible (preferred, cookieless) or Google
  * Analytics when configured. Both load lazily so they don't hurt Core Web Vitals.
- * Nothing configured → nothing loads.
+ * Nothing configured → nothing loads. Values come from the root layout (DB >
+ * env), not read here directly — this is a Client Component and can't reach
+ * the admin DB itself.
  */
-export function Analytics() {
-  const { plausibleDomain, gaId } = site.analytics;
+export function Analytics({ plausibleDomain, gaId }: { plausibleDomain: string; gaId: string }) {
   return (
     <>
       {plausibleDomain && (

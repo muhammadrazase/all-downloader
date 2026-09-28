@@ -11,9 +11,9 @@ export const site = {
   shortName: 'SnapVidly',
   domain: new URL(SITE_URL).host,
   url: SITE_URL,
-  tagline: 'Download any social video — free, fast, no watermark.',
+  tagline: 'One free hub for video downloads, AI, PDF and file tools.',
   description:
-    'SnapVidly is a free all-in-one video downloader for TikTok, Instagram, YouTube, Facebook, X (Twitter), Reddit, Pinterest, Vimeo, Twitch and more. Save videos in HD — no signup, no watermark. Works on mobile and PC.',
+    'SnapVidly is a free hub of 40+ online tools: download videos from TikTok, Instagram, YouTube, Facebook, X (Twitter), Reddit, Pinterest, Vimeo, Twitch and more in HD, plus AI video-to-text and summaries, video converters, PDF tools and file utilities. No signup, no watermark, works on mobile and PC.',
   locale: 'en_US',
   twitter: '@snapvidly',
   email: 'support@snapvidly.com',

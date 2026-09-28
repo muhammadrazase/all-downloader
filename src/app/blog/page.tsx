@@ -1,12 +1,11 @@
-import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import type { Metadata } from 'next';
-import { BlogCard } from '@/components/BlogCard';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { getAllPosts, getAllCategories, CATEGORY_LABEL } from '@/lib/blog';
-import { PLATFORMS } from '@/lib/platforms';
-import { PlatformIcon } from '@/components/PlatformIcon';
-import { AdSlot } from '@/components/ads/AdSlot';
+import { BlogExplorer } from '@/components/BlogExplorer';
+import { getAllPosts, getAllCategories } from '@/lib/blog';
 import { buildMetadata } from '@/lib/seo';
+import { isContentEnabled } from '@/lib/config/contentConfig';
+import { getBoolSetting } from '@/lib/config/settings.server';
 
 export const dynamic = 'force-static';
 
@@ -18,7 +17,8 @@ export const metadata: Metadata = buildMetadata({
 });
 
 export default function BlogIndex() {
-  const posts = getAllPosts();
+  if (!getBoolSetting('blogEnabled', true)) redirect('/');
+  const posts = getAllPosts().filter((p) => isContentEnabled('blog-post', p.slug));
   const categories = getAllCategories();
 
   return (
@@ -34,35 +34,11 @@ export default function BlogIndex() {
         </p>
       </section>
 
-      {/* Category filter — internal links */}
-      <section className="container-page">
-        <div className="flex flex-wrap justify-center gap-2">
-          {categories.map((c) => (
-            <Link
-              key={c}
-              href={`/blog/${c}`}
-              className="inline-flex items-center gap-2 rounded-full border border-surface-border bg-surface px-4 py-2 text-sm font-medium text-ink-muted transition-colors hover:border-accent hover:text-accent"
-            >
-              <PlatformIcon platform={c} color={PLATFORMS[c].brandColor} className="h-4 w-4" />
-              {CATEGORY_LABEL[c]}
-            </Link>
-          ))}
-        </div>
-      </section>
-
-      <div className="container-page">
-        <AdSlot placement="rectangle" ezoicId={103} />
-      </div>
-
-      <section className="container-page py-12">
+      <section className="container-page pb-16">
         {posts.length === 0 ? (
           <p className="text-center text-ink-muted">New articles are on the way. Check back soon.</p>
         ) : (
-          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-            {posts.map((p) => (
-              <BlogCard key={`${p.category}/${p.slug}`} post={p} />
-            ))}
-          </div>
+          <BlogExplorer posts={posts} categories={categories} />
         )}
       </section>
     </>

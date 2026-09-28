@@ -1,15 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { site } from '@/lib/site';
+
+interface Props {
+  /** Resolved server-side (admin setting > env default) — see browser-extension/page.tsx. */
+  url: string;
+}
 
 /**
- * Chrome-focused install CTA. Uses NEXT_PUBLIC_CHROME_EXTENSION_URL when set,
- * otherwise shows "coming soon". Detects the visitor's browser to tailor the
- * message (Chromium → add directly; others → nudge to the bookmarklet below).
+ * Chrome-focused install CTA. Shows "coming soon" when no url is configured.
+ * Detects the visitor's browser to tailor the message (Chromium → add
+ * directly; others → nudge to the bookmarklet below).
  */
-export function InstallExtensionCTA() {
-  const url = site.chromeExtensionUrl;
+export function InstallExtensionCTA({ url }: Props) {
   const [isChromium, setIsChromium] = useState<boolean | null>(null);
 
   useEffect(() => {

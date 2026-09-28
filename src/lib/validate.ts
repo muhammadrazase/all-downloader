@@ -30,6 +30,8 @@ export type ExtractRequest = z.infer<typeof extractRequestSchema>;
 const PRIVATE_HOST = /^(localhost|0\.0\.0\.0|127\.|10\.|192\.168\.|169\.254\.|::1|\[::1\]|metadata\.google\.internal)/i;
 const PRIVATE_IP_RANGE =
   /^(?:127\.|10\.|192\.168\.|169\.254\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.)/;
+/** RFC 6761 reserves the whole .localhost TLD for loopback; PRIVATE_HOST is ^-anchored and misses subdomains. */
+const LOOPBACK_TLD = /(^|\.)localhost$/i;
 
 export interface ValidationResult {
   ok: boolean;
@@ -53,7 +55,7 @@ export function validateExtractTarget(url: string, platform: PlatformKey): Valid
   }
 
   const host = parsed.hostname.toLowerCase();
-  if (PRIVATE_HOST.test(host) || PRIVATE_IP_RANGE.test(host)) {
+  if (PRIVATE_HOST.test(host) || PRIVATE_IP_RANGE.test(host) || LOOPBACK_TLD.test(host)) {
     return { ok: false, reason: 'Internal addresses are not allowed.' };
   }
 

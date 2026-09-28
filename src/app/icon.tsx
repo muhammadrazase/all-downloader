@@ -3,8 +3,7 @@ import { ImageResponse } from 'next/og';
 export const size = { width: 32, height: 32 };
 export const contentType = 'image/png';
 
-/** Generated favicon — SnapVidly play mark. Uses a real <svg> path (Satori doesn't
- *  support the CSS border-triangle trick), so it renders correctly at any size. */
+/** Generated favicon — a 2x2 tile grid (a tools hub, not a play mark). */
 export default function Icon() {
   return new ImageResponse(
     (
@@ -20,7 +19,10 @@ export default function Icon() {
         }}
       >
         <svg width="18" height="18" viewBox="0 0 24 24">
-          <path d="M8 5.5v13l11-6.5-11-6.5z" fill="#fff" />
+          <rect x="5.1" y="5.1" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="12.9" y="5.1" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="5.1" y="12.9" width="6" height="6" rx="1.7" fill="#fff" />
+          <rect x="12.9" y="12.9" width="6" height="6" rx="1.7" fill="#fff" />
         </svg>
       </div>
     ),

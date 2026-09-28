@@ -1,19 +1,23 @@
-import { notFound } from 'next/navigation';
+import { Suspense } from 'react';
+import { notFound, redirect } from 'next/navigation';
 import Link from 'next/link';
 import type { Metadata } from 'next';
-import { MDXRemote } from 'next-mdx-remote/rsc';
+import { MDXRemote } from 'next-mdx-remote-client/rsc';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { JsonLd } from '@/components/JsonLd';
-import { AdSlot } from '@/components/ads/AdSlot';
 import { BlogCard, formatDate } from '@/components/BlogCard';
 import { PlatformIcon } from '@/components/PlatformIcon';
 import { getPost, getAllPostParams, getPostsByCategory, CATEGORY_LABEL, type BlogCategory } from '@/lib/blog';
 import { PLATFORMS } from '@/lib/platforms';
 import { buildMetadata } from '@/lib/seo';
 import { articleSchema, breadcrumbSchema } from '@/lib/schema';
+import { getSeoOverride, isContentEnabled } from '@/lib/config/contentConfig';
+import { getBoolSetting } from '@/lib/config/settings.server';
 
 export const dynamic = 'force-static';
-export const dynamicParams = false;
+// true so a post published from the admin panel after the last build renders
+// on its first request instead of needing a full redeploy (see savePostAction).
+export const dynamicParams = true;
 
 export function generateStaticParams() {
   return getAllPostParams();
@@ -27,10 +31,14 @@ export async function generateMetadata({
   const { category, slug } = await params;
   const post = getPost(category, slug);
   if (!post) return {};
+  const override = getSeoOverride('blog-post', slug);
   return buildMetadata({
-    title: post.title,
-    description: post.description,
-    path: `/blog/${category}/${slug}`,
+    title: override?.title || post.title,
+    description: override?.description || post.description,
+    path: override?.canonical || `/blog/${category}/${slug}`,
+    noindex: override?.noindex,
+    image: override?.ogImage,
+    keywords: override?.keywords || [post.keyword],
     type: 'article',
     publishedTime: post.date,
   });
@@ -43,12 +51,13 @@ export default async function PostPage({
 }) {
   const { category, slug } = await params;
   const post = getPost(category, slug);
-  if (!post) notFound();
+  if (!post || post.draft) notFound();
+  if (!getBoolSetting('blogEnabled', true) || !isContentEnabled('blog-post', slug)) redirect('/');
 
   const cat = category as BlogCategory;
   const platform = PLATFORMS[cat];
   const related = getPostsByCategory(cat)
-    .filter((p) => p.slug !== slug)
+    .filter((p) => p.slug !== slug && isContentEnabled('blog-post', p.slug))
     .slice(0, 3);
   const crumbs = [
     { name: 'Home', path: '/' },
@@ -88,12 +97,9 @@ export default async function PostPage({
         </header>
 
         <div className="prose-ssd mx-auto mt-10">
-          <MDXRemote source={post.content} />
-        </div>
-
-        {/* Ad slot — CLS-safe, only renders when a network is configured */}
-        <div className="mx-auto max-w-prose">
-          <AdSlot placement="rectangle" ezoicId={102} />
+          <Suspense fallback={null}>
+            <MDXRemote source={post.content} />
+          </Suspense>
         </div>
 
         {/* Conversion CTA back to the tool */}

@@ -15,7 +15,7 @@ import { Analytics } from './Analytics';
  * The scripts are rendered INSIDE this client component (not passed as children),
  * so when consent is required nothing third-party appears in the HTML until Accept.
  */
-export function ConsentGate() {
+export function ConsentGate({ plausibleDomain, gaId }: { plausibleDomain: string; gaId: string }) {
   const required = process.env.NEXT_PUBLIC_CONSENT_REQUIRED === 'true';
   const [consent, setConsent] = useState<'accepted' | 'declined' | null>(null);
   const [ready, setReady] = useState(false);
@@ -41,7 +41,7 @@ export function ConsentGate() {
       {consent === 'accepted' && (
         <>
           <AdScripts />
-          <Analytics />
+          <Analytics plausibleDomain={plausibleDomain} gaId={gaId} />
         </>
       )}
       {ready && required && consent === null && (

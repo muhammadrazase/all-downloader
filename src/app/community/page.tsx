@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import { GiscusComments } from '@/components/GiscusComments';
 import { site } from '@/lib/site';
 import { buildMetadata } from '@/lib/seo';
+import { getSetting } from '@/lib/config/settings.server';
 
 export const dynamic = 'force-static';
 
@@ -14,6 +15,16 @@ export const metadata: Metadata = buildMetadata({
 });
 
 export default function CommunityPage() {
+  // Community links + Giscus are admin-editable (Site settings) — DB > env.
+  const discordUrl = getSetting('DISCORD_URL') || site.discordUrl;
+  const telegramUrl = getSetting('TELEGRAM_URL') || site.telegramUrl;
+  const giscus = {
+    repo: getSetting('GISCUS_REPO') || site.giscus.repo,
+    repoId: getSetting('GISCUS_REPO_ID') || site.giscus.repoId,
+    category: site.giscus.category,
+    categoryId: getSetting('GISCUS_CATEGORY_ID') || site.giscus.categoryId,
+  };
+
   return (
     <>
       <section className="container-page py-14 text-center">
@@ -23,11 +34,11 @@ export default function CommunityPage() {
         </p>
       </section>
 
-      {(site.discordUrl || site.telegramUrl) && (
+      {(discordUrl || telegramUrl) && (
         <section className="container-page pb-8">
           <div className="grid gap-5 sm:grid-cols-2">
-            {site.discordUrl && (
-              <a href={site.discordUrl} target="_blank" rel="noopener noreferrer" className="card group flex items-center gap-4 p-6 transition-all hover:-translate-y-0.5 hover:shadow-md">
+            {discordUrl && (
+              <a href={discordUrl} target="_blank" rel="noopener noreferrer" className="card group flex items-center gap-4 p-6 transition-all hover:-translate-y-0.5 hover:shadow-md">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#5865F2]/10 text-[#5865F2]">💬</span>
                 <div>
                   <h2 className="text-lg font-semibold text-ink group-hover:text-accent">Discord</h2>
@@ -35,8 +46,8 @@ export default function CommunityPage() {
                 </div>
               </a>
             )}
-            {site.telegramUrl && (
-              <a href={site.telegramUrl} target="_blank" rel="noopener noreferrer" className="card group flex items-center gap-4 p-6 transition-all hover:-translate-y-0.5 hover:shadow-md">
+            {telegramUrl && (
+              <a href={telegramUrl} target="_blank" rel="noopener noreferrer" className="card group flex items-center gap-4 p-6 transition-all hover:-translate-y-0.5 hover:shadow-md">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[#229ED9]/10 text-[#229ED9]">✈️</span>
                 <div>
                   <h2 className="text-lg font-semibold text-ink group-hover:text-accent">Telegram</h2>
@@ -69,7 +80,7 @@ export default function CommunityPage() {
             Start a thread below. Discussions are powered by GitHub — no separate account, no database, spam-protected.
           </p>
           <div className="mt-6">
-            <GiscusComments />
+            <GiscusComments giscus={giscus} />
           </div>
         </div>
       </section>
